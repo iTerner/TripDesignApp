@@ -14,7 +14,9 @@
 
 - **Zero cost, no card anywhere** (spec §0 #1): Firebase **Spark** plan only; Cloudflare **Workers Free** only; GitHub Actions free minutes; Gemini via a free **AI Studio** key; OpenRouter `:free` models only. Never enable billing, never add a payment method, never install the Stripe SDK.
 - **TypeScript everywhere** (spec §0 #7). `strict: true`, no `any` except at untyped boundaries wrapped in Zod parsing.
-- **Secrets exist only as Cloudflare Worker secrets** (spec §8): `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `ADMIN_UIDS`. Never in the web bundle, Firestore, or the repo. `.env*` files are git-ignored except `*.example`.
+- **Secrets exist only as Cloudflare Worker secrets** (spec §8): `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT`. Never in the web bundle, Firestore, or the repo. Locally they live in `apps/api/.dev.vars` (dev) and the repo-root `.env` (source for `prod.bat` secret sync); both are git-ignored, only `*.example` files are committed. These five names are used **identically** in `Env`, `.dev.vars`, `.env`, `dev.bat`, `prod.bat`, `wrangler secret put` and the tests.
+- **Web env var names:** `VITE_API_URL` (Worker base URL), `VITE_USE_EMULATORS` (`1` → connect the Firebase SDK to local emulators), plus the four `VITE_FIREBASE_*` config values (public, not secrets).
+- **Security: every security rule in spec §8 that applies to this phase must have an automated test; Phase 0 is not done until the independent security review (Task 17) has no open high/medium findings.**
 - **Admin identity = Firebase UID, hardcoded in deployed code** (spec §8): in `infra/firebase/firestore.rules` (`isAdmin()`) and in the Worker secret `ADMIN_UIDS`. No `admins` collection.
 - **Token rules** (spec §8): verify RS256 signature via Google JWKS, `iss = https://securetoken.google.com/<projectId>`, `aud = <projectId>`, `exp` future, `sub` non-empty, `email_verified === true`. Admin **state-changing** requests additionally require `auth_time` within the last **15 minutes**.
 - **Firestore rules deny by default** (spec §6/§8). Clients may read their own `users/{uid}`; everything else in Phase 0 is Worker-only via service account.
@@ -32,14 +34,20 @@
 
 ```
 TripDesignApp/
-├─ package.json                  # workspace scripts: lint, typecheck, test, build
+├─ package.json                  # workspace scripts: lint, typecheck, test, build, secret-scan, scan:bundle; simple-git-hooks pre-commit
 ├─ pnpm-workspace.yaml
 ├─ tsconfig.base.json
 ├─ biome.json
 ├─ .nvmrc                        # 22
-├─ .gitignore
-├─ .github/workflows/ci.yml      # lint, typecheck, unit tests, rules tests, web build
+├─ .gitignore                    # .env, .dev.vars, *service-account*.json, *.pem, *.p12, *.key (tested)
+├─ .env.example                  # GEMINI_API_KEY, OPENROUTER_API_KEY, TAVILY_API_KEY, ADMIN_UIDS, FIREBASE_SERVICE_ACCOUNT
+├─ dev.bat                       # emulators + Worker + app with hot reload (Task 14)
+├─ prod.bat                      # guarded deploy: clean tree, typecheck/lint/test/audit, build, secret sync, deploy, tag (Task 14)
+├─ .github/workflows/ci.yml      # lint, typecheck, unit tests, rules tests, audit, web build, bundle + repo secret scans
 ├─ .github/workflows/deploy.yml  # on push master: Worker, Hosting, Firestore rules
+├─ tools/                        # @wayfare/tools — repo-level checks
+│  ├─ scripts/secret-scan.mjs    # pre-commit / CI secret scanner (gitleaks if present, regex fallback)
+│  └─ test/{gitignore,secretScan,bundleSecrets}.test.ts
 ├─ packages/domain/              # @wayfare/domain — pure TS, zero runtime deps except zod
 │  ├─ src/i18n/locales.ts        # LOCALES registry, getLocale, DEFAULT_LOCALE
 │  ├─ src/config/schema.ts       # AppConfigSchema (magic numbers, tier limits), DEFAULT_CONFIG
@@ -64,7 +72,8 @@ TripDesignApp/
 │  ├─ src/http/errors.ts         # apiError()
 │  ├─ src/middleware/cors.ts
 │  ├─ src/middleware/securityHeaders.ts
-│  ├─ src/auth/verifyIdToken.ts  # jose verification → AuthUser
+│  ├─ src/middleware/rateLimit.ts # in-memory token bucket per IP/uid (Phase 6 baseline)
+│  ├─ src/auth/verifyIdToken.ts  # jose verification → AuthUser; emulator mode via FIREBASE_AUTH_EMULATOR_HOST
 │  ├─ src/auth/middleware.ts     # firebaseAuth
 │  ├─ src/auth/admin.ts          # requireAdmin, parseAdminUids
 │  ├─ src/firestore/serviceAccount.ts # getAccessToken (KV-cached), parseServiceAccount
@@ -83,12 +92,13 @@ TripDesignApp/
 │  ├─ src/routes/admin.tsx       # admin ping + LLM chain test
 │  ├─ src/components/LanguageSelect.tsx
 │  ├─ src/lib/firebase.ts        # app, auth, signInWithGoogle()
+│  ├─ src/lib/emulators.ts       # connectAuthEmulator when VITE_USE_EMULATORS=1
 │  ├─ src/lib/useAuth.ts
 │  ├─ src/lib/api.ts             # apiFetch<T>(path, schema, init)
 │  ├─ src/i18n/index.ts, en.json, he.json
 │  └─ src/test/…                 # Testing Library tests
 └─ infra/firebase/               # @wayfare/firebase-rules
-   ├─ firebase.json              # hosting (public: ../../apps/web/dist, headers), firestore, emulators
+   ├─ firebase.json              # hosting (public: ../../apps/web/dist, security headers, index.html no-cache), firestore, emulators (auth 9099, firestore 8080, UI 4000)
    ├─ .firebaserc
    ├─ firestore.rules
    ├─ firestore.indexes.json
@@ -125,7 +135,7 @@ git --version
 
 1. https://console.cloud.google.com → select the Firebase project → **IAM & Admin → Service Accounts → Create**: `wayfare-worker`.
 2. Roles: `Cloud Datastore User` (Worker), `Firebase Hosting Admin` and `Firebase Rules Admin` (CI deploys). Nothing else.
-3. **Keys → Add key → JSON** → download. This file is `FIREBASE_SERVICE_ACCOUNT_JSON` (Task 13) and the GitHub secret `FIREBASE_SERVICE_ACCOUNT` (Task 14). Never commit it.
+3. **Keys → Add key → JSON** → download. Its single-line JSON is the Worker secret `FIREBASE_SERVICE_ACCOUNT` (Task 13 / `prod.bat`) and the GitHub secret `FIREBASE_SERVICE_ACCOUNT` (Task 15). Never commit it.
 
 - [ ] **Step 4: Cloudflare**
 
@@ -137,6 +147,8 @@ git --version
 
 1. https://aistudio.google.com/apikey → **Create API key** inside the Firebase project → `GEMINI_API_KEY`. Do not link billing.
 2. https://openrouter.ai → **Keys → Create** → `OPENROUTER_API_KEY`. Do not buy credits.
+3. https://app.tavily.com → sign up (free tier, no card) → **API key** → `TAVILY_API_KEY`. (Not called in Phase 0; the secret slot exists so the Search chain in Phase 1 needs no infra change.)
+4. Create the repo-root `.env` (git-ignored; read only by `prod.bat`) from `.env.example` with the five secret names above, and `apps/api/.dev.vars` from its example.
 
 - [ ] **Step 6: GitHub repository secrets and variables** (Settings → Secrets and variables → Actions)
 
@@ -149,7 +161,7 @@ git --version
 | Variable | `VITE_FIREBASE_API_KEY` | Step 2.4 (public web config) |
 | Variable | `VITE_FIREBASE_AUTH_DOMAIN` | `<project>.firebaseapp.com` |
 | Variable | `VITE_FIREBASE_APP_ID` | Step 2.4 |
-| Variable | `VITE_API_BASE_URL` | set after Task 13 Step 1 (`https://wayfare-api.<subdomain>.workers.dev`) |
+| Variable | `VITE_API_URL` | set after Task 13 Step 1 (`https://wayfare-api.<subdomain>.workers.dev`) |
 
 ---
 
@@ -235,6 +247,8 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+.dev.vars.*
+!.dev.vars.example
 .env
 .env.*
 !.env.example
@@ -247,7 +261,19 @@ ui-debug.log
 coverage/
 *.tsbuildinfo
 .cursor/
-service-account*.json
+*service-account*.json
+*.pem
+*.p12
+*.key
+```
+
+`.env.example` (repo root; the real `.env` is the source `prod.bat` syncs to Worker secrets):
+```
+GEMINI_API_KEY=
+OPENROUTER_API_KEY=
+TAVILY_API_KEY=
+ADMIN_UIDS=
+FIREBASE_SERVICE_ACCOUNT=
 ```
 
 `.editorconfig`:
@@ -320,11 +346,141 @@ export { DOMAIN_VERSION } from "./version";
 Run: `pnpm --filter @wayfare/domain test && pnpm lint && pnpm typecheck`
 Expected: 1 test PASS; Biome clean; tsc clean.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: Failing test — `.gitignore` covers every secret-bearing file pattern** (security)
+
+Create `tools/` as a tiny workspace package for repo-level checks. `tools/package.json`:
+```json
+{
+  "name": "@wayfare/tools",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "build": "echo skip", "secret-scan": "node scripts/secret-scan.mjs" },
+  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.9.0", "vitest": "^3.2.0" }
+}
+```
+`tools/tsconfig.json`: `{ "extends": "../tsconfig.base.json", "compilerOptions": { "noEmit": true, "types": ["vitest/globals", "node"], "allowJs": true }, "include": ["test", "scripts"] }` — and add `"tools"` to `pnpm-workspace.yaml` packages.
+
+`tools/test/gitignore.test.ts`:
+```ts
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+
+const ROOT = resolve(import.meta.dirname, "../..");
+/** Each path must be ignored by git; if any is tracked-able the test fails. */
+const MUST_BE_IGNORED = [
+  ".env",
+  ".env.production",
+  "apps/api/.dev.vars",
+  "apps/web/.env",
+  "apps/web/.env.production",
+  "wayfare-service-account.json",
+  "infra/service-account-prod.json",
+  "keys/private.pem",
+  "cert.p12",
+  "id_rsa.key",
+];
+const MUST_NOT_BE_IGNORED = [".env.example", "apps/api/.dev.vars.example", "apps/web/.env.production.example"];
+
+function isIgnored(path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", path], { cwd: ROOT, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test.each(MUST_BE_IGNORED)("%s is git-ignored", (p) => {
+  expect(isIgnored(p)).toBe(true);
+});
+
+test.each(MUST_NOT_BE_IGNORED)("%s is NOT git-ignored (examples must be committed)", (p) => {
+  expect(isIgnored(p)).toBe(false);
+});
+```
+Run: `pnpm install && pnpm --filter @wayfare/tools test` — Expected: PASS for all paths (if any `MUST_BE_IGNORED` fails, fix `.gitignore` before continuing).
+
+- [ ] **Step 8: Pre-commit secret scan (gitleaks if installed, regex fallback) wired with simple-git-hooks**
+
+`tools/scripts/secret-scan.mjs`:
+```js
+// Scans staged files (or paths given as args) for secret-looking strings. Exit 1 on any hit.
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const PATTERNS = [
+  [/AIza[0-9A-Za-z_-]{35}/, "Google API key"],
+  [/sk-or-v1-[0-9a-f]{64}/, "OpenRouter key"],
+  [/tvly-[0-9A-Za-z_-]{20,}/, "Tavily key"],
+  [/"private_key"\s*:\s*"-----BEGIN/, "Service-account private key"],
+  [/-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/, "Private key block"],
+  [/ghp_[0-9A-Za-z]{36}/, "GitHub token"],
+];
+const ALLOW = [/\.example$/, /secret-scan\.mjs$/, /\/test\/helpers\/testPem\.ts$/, /pnpm-lock\.yaml$/];
+
+const gitleaks = spawnSync("gitleaks", ["version"], { stdio: "ignore" });
+if (gitleaks.status === 0) {
+  const r = spawnSync("gitleaks", ["protect", "--staged", "--redact", "--no-banner"], { stdio: "inherit" });
+  process.exit(r.status ?? 1);
+}
+
+const files = process.argv.length > 2
+  ? process.argv.slice(2)
+  : execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACM"], { encoding: "utf8" }).split("\n").filter(Boolean);
+
+let hits = 0;
+for (const f of files) {
+  if (ALLOW.some((a) => a.test(f))) continue;
+  let text;
+  try { text = readFileSync(f, "utf8"); } catch { continue; }
+  for (const [re, label] of PATTERNS) {
+    if (re.test(text)) { console.error(`[secret-scan] ${label} in ${f}`); hits += 1; }
+  }
+}
+if (hits) { console.error(`[secret-scan] ${hits} potential secret(s) found. Commit aborted.`); process.exit(1); }
+console.log("[secret-scan] clean");
+```
+
+`tools/test/secretScan.test.ts`:
+```ts
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const SCRIPT = resolve(import.meta.dirname, "../scripts/secret-scan.mjs");
+
+function scan(content: string) {
+  const dir = mkdtempSync(join(tmpdir(), "scan-"));
+  const file = join(dir, "leak.ts");
+  writeFileSync(file, content);
+  return spawnSync("node", [SCRIPT, file], { encoding: "utf8" });
+}
+
+test("flags a Google API key and a service-account private key", () => {
+  expect(scan(`const k = "AIza${"A".repeat(35)}";`).status).toBe(1);
+  expect(scan(`{"private_key": "-----BEGIN PRIVATE KEY-----\\nabc"}`).status).toBe(1);
+});
+
+test("passes clean code", () => {
+  expect(scan(`export const x = 1;`).status).toBe(0);
+});
+```
+
+Root `package.json` additions:
+```json
+"scripts": { "...": "...", "secret-scan": "pnpm --filter @wayfare/tools secret-scan", "prepare": "simple-git-hooks" },
+"simple-git-hooks": { "pre-commit": "pnpm secret-scan" },
+"devDependencies": { "...": "...", "simple-git-hooks": "^2.11.0" }
+```
+Run: `pnpm install && pnpm --filter @wayfare/tools test && git config core.hooksPath` — Expected: both tests PASS; `simple-git-hooks` installed the pre-commit hook (`.git/hooks/pre-commit` exists). Smoke: stage a file containing `AIza` + 35 chars → `git commit` is refused; unstage it.
+
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A
-git commit -m "chore: pnpm monorepo scaffold with biome, vitest and @wayfare/domain"
+git commit -m "chore: pnpm monorepo scaffold with biome, vitest, @wayfare/domain, gitignore tests and pre-commit secret scan"
 ```
 
 ---
@@ -1454,7 +1610,8 @@ git commit -m "feat(providers): ModelRouter with quota-aware fallback chain and 
 **Interfaces:**
 - Produces:
   ```ts
-  interface Env { CONFIG_KV: KVNamespace; FIREBASE_PROJECT_ID: string; ALLOWED_ORIGIN: string; ADMIN_UIDS: string; GEMINI_API_KEY: string; OPENROUTER_API_KEY: string; FIREBASE_SERVICE_ACCOUNT_JSON: string }
+  interface Env { CONFIG_KV: KVNamespace; FIREBASE_PROJECT_ID: string; ALLOWED_ORIGIN: string; ADMIN_UIDS: string; GEMINI_API_KEY: string; OPENROUTER_API_KEY: string; TAVILY_API_KEY: string; FIREBASE_SERVICE_ACCOUNT: string; FIREBASE_AUTH_EMULATOR_HOST?: string; FIRESTORE_EMULATOR_HOST?: string }
+  const rateLimit: (opts?: { limit?: number; windowMs?: number }) => MiddlewareHandler<AppEnv>   // in-memory token bucket per IP (+ per uid when present); 429 rate_limited when exceeded. Phase 6 hardening baseline.
   interface AppDeps { jwks?: JWTVerifyGetKey; fetchImpl?: FetchLike; now?: () => Date }
   interface AppVariables { deps: { fetchImpl: FetchLike; now: () => Date; jwks?: JWTVerifyGetKey }; user: AuthUser /* set by firebaseAuth */ }
   type AppEnv = { Bindings: Env; Variables: AppVariables }
@@ -1515,13 +1672,14 @@ id = "<kv-id>"
 enabled = true
 ```
 
-`apps/api/.dev.vars.example` (copy to `.dev.vars`, git-ignored; `.dev.vars` overrides `[vars]` locally):
+`apps/api/.dev.vars.example` (copy to `.dev.vars`, git-ignored; `.dev.vars` overrides `[vars]` locally; `dev.bat` creates the file with these keys if missing):
 ```
 ALLOWED_ORIGIN=http://localhost:5173
-ADMIN_UIDS=
 GEMINI_API_KEY=
 OPENROUTER_API_KEY=
-FIREBASE_SERVICE_ACCOUNT_JSON=
+TAVILY_API_KEY=
+ADMIN_UIDS=
+FIREBASE_SERVICE_ACCOUNT=
 ```
 
 `apps/api/tsconfig.json`:
@@ -1551,7 +1709,8 @@ export default defineWorkersConfig({
             ADMIN_UIDS: "admin-uid-1,admin-uid-2",
             GEMINI_API_KEY: "g",
             OPENROUTER_API_KEY: "o",
-            FIREBASE_SERVICE_ACCOUNT_JSON: "{}",
+            TAVILY_API_KEY: "t",
+            FIREBASE_SERVICE_ACCOUNT: "{}",
           },
           kvNamespaces: ["CONFIG_KV"],
         },
@@ -1575,28 +1734,71 @@ import { createApp } from "../src/app";
 
 const app = createApp();
 
-test("GET /health is public and carries security headers", async () => {
+const SECURITY_HEADERS: Record<string, string | RegExp> = {
+  "strict-transport-security": /max-age=\d+/,
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "x-frame-options": "DENY",
+  "content-security-policy": /frame-ancestors 'none'/,
+  "permissions-policy": /geolocation=\(\)/,
+  "cache-control": "no-store",
+};
+
+function expectSecurityHeaders(res: Response) {
+  for (const [name, expected] of Object.entries(SECURITY_HEADERS)) {
+    const v = res.headers.get(name);
+    if (typeof expected === "string") expect(v, name).toBe(expected);
+    else expect(v ?? "", name).toMatch(expected);
+  }
+}
+
+test("GET /health is public and carries every security header", async () => {
   const res = await app.request("/health", {}, env);
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ ok: true, service: "api" });
-  expect(res.headers.get("strict-transport-security")).toContain("max-age=");
-  expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+  expectSecurityHeaders(res);
 });
 
-test("CORS allows only ALLOWED_ORIGIN", async () => {
+test("security headers are present on 404 and 401 responses too", async () => {
+  expectSecurityHeaders(await app.request("/nope", {}, env));
+  expectSecurityHeaders(await app.request("/ping", {}, env)); // 401 once Task 7 lands; 404 before — headers must be there either way
+});
+
+test("CORS: foreign Origin gets no Access-Control-Allow-Origin; allowed origin does, including preflight", async () => {
   const ok = await app.request("/health", { headers: { origin: "https://app.test" } }, env);
   expect(ok.headers.get("access-control-allow-origin")).toBe("https://app.test");
+  expect(ok.headers.get("vary")).toContain("Origin");
+
   const bad = await app.request("/health", { headers: { origin: "https://evil.test" } }, env);
   expect(bad.headers.get("access-control-allow-origin")).toBeNull();
-  const preflight = await app.request("/ping", { method: "OPTIONS", headers: { origin: "https://evil.test", "access-control-request-method": "GET" } }, env);
-  expect(preflight.headers.get("access-control-allow-origin")).toBeNull();
+
+  const badPreflight = await app.request("/ping", { method: "OPTIONS", headers: { origin: "https://evil.test", "access-control-request-method": "GET" } }, env);
+  expect(badPreflight.headers.get("access-control-allow-origin")).toBeNull();
+
+  const goodPreflight = await app.request("/ping", { method: "OPTIONS", headers: { origin: "https://app.test", "access-control-request-method": "GET", "access-control-request-headers": "authorization" } }, env);
+  expect(goodPreflight.status).toBe(204);
+  expect(goodPreflight.headers.get("access-control-allow-origin")).toBe("https://app.test");
+  expect(goodPreflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
+  expect(goodPreflight.headers.get("access-control-allow-methods")).toContain("GET");
 });
 
 test("unknown route returns JSON 404", async () => {
   const res = await app.request("/nope", {}, env);
   expect(res.status).toBe(404);
   expect(await res.json()).toEqual({ error: "not_found", message: "Not found" });
+});
+
+test("an unexpected exception returns a generic 500 with no stack trace or message leakage", async () => {
+  const boom = createApp();
+  boom.get("/boom", () => {
+    throw new Error("secret internal detail: db password is hunter2");
+  });
+  const res = await boom.request("/boom", {}, env);
+  expect(res.status).toBe(500);
+  const text = await res.text();
+  expect(JSON.parse(text)).toEqual({ error: "internal", message: "Internal error" });
+  expect(text).not.toMatch(/hunter2|at .*\.ts:\d+|Error:/);
+  expectSecurityHeaders(res);
 });
 ```
 
@@ -1617,7 +1819,12 @@ export interface Env {
   ADMIN_UIDS: string;
   GEMINI_API_KEY: string;
   OPENROUTER_API_KEY: string;
-  FIREBASE_SERVICE_ACCOUNT_JSON: string;
+  TAVILY_API_KEY: string;
+  FIREBASE_SERVICE_ACCOUNT: string;
+  /** Set ONLY by dev.bat via `wrangler dev --var`; when present, tokens from the Auth emulator are accepted (Task 7). Never set in production. */
+  FIREBASE_AUTH_EMULATOR_HOST?: string;
+  /** Set ONLY by dev.bat; Firestore REST calls go to the emulator (Task 9). */
+  FIRESTORE_EMULATOR_HOST?: string;
 }
 ```
 
@@ -1643,6 +1850,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   c.header("referrer-policy", "no-referrer");
   c.header("x-frame-options", "DENY");
   c.header("content-security-policy", "default-src 'none'; frame-ancestors 'none'");
+  c.header("permissions-policy", "geolocation=(), camera=(), microphone=(), payment=()");
   c.header("cache-control", "no-store");
 };
 ```
@@ -1728,18 +1936,89 @@ export default { fetch: app.fetch } satisfies ExportedHandler<Env>;
 - [ ] **Step 6: Run tests, lint, typecheck**
 
 Run: `pnpm --filter @wayfare/api test && pnpm lint && pnpm typecheck`
-Expected: 3 tests PASS.
+Expected: all health/CORS/header/error tests PASS.
 
-- [ ] **Step 7: Local smoke**
+- [ ] **Step 7: Failing test — rate-limit baseline (Phase 6 hardening, stubbed now)** (security)
+
+`apps/api/test/rateLimit.test.ts`:
+```ts
+import { env } from "cloudflare:test";
+import { createApp } from "../src/app";
+
+test("the 61st request from one IP within a minute gets 429 rate_limited; another IP is unaffected", async () => {
+  const app = createApp({ now: () => new Date("2026-09-20T12:00:00Z") });
+  const from = (ip: string) => app.request("/health", { headers: { "cf-connecting-ip": ip } }, env);
+  for (let i = 0; i < 60; i += 1) expect((await from("203.0.113.7")).status).toBe(200);
+  const blocked = await from("203.0.113.7");
+  expect(blocked.status).toBe(429);
+  expect(await blocked.json()).toMatchObject({ error: "rate_limited" });
+  expect(blocked.headers.get("retry-after")).toMatch(/^\d+$/);
+  expect((await from("203.0.113.8")).status).toBe(200);
+});
+
+test("the bucket refills after the window", async () => {
+  let t = Date.parse("2026-09-20T12:00:00Z");
+  const app = createApp({ now: () => new Date(t) });
+  const from = () => app.request("/health", { headers: { "cf-connecting-ip": "203.0.113.9" } }, env);
+  for (let i = 0; i < 60; i += 1) await from();
+  expect((await from()).status).toBe(429);
+  t += 61_000;
+  expect((await from()).status).toBe(200);
+});
+```
+
+`apps/api/src/middleware/rateLimit.ts`:
+```ts
+import type { MiddlewareHandler } from "hono";
+import type { AppEnv } from "../app";
+import { apiError } from "../http/errors";
+
+/**
+ * Phase 0 baseline for spec §8 "per-IP and per-UID rate limits".
+ * In-memory per isolate: good enough to stop a single-client loop, not a
+ * distributed guarantee. Phase 6 replaces the store with KV/Durable Objects
+ * and adds App Check. Keyed by IP, and additionally by uid once auth ran.
+ */
+export function rateLimit(opts: { limit?: number; windowMs?: number } = {}): MiddlewareHandler<AppEnv> {
+  const limit = opts.limit ?? 60;
+  const windowMs = opts.windowMs ?? 60_000;
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+  return async (c, next) => {
+    const now = c.get("deps").now().getTime();
+    const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+    const uid = (c.get("user") as { uid?: string } | undefined)?.uid;
+    const keys = uid ? [`ip:${ip}`, `uid:${uid}`] : [`ip:${ip}`];
+    for (const key of keys) {
+      const b = buckets.get(key);
+      if (!b || b.resetAt <= now) {
+        buckets.set(key, { count: 1, resetAt: now + windowMs });
+        continue;
+      }
+      if (b.count >= limit) {
+        c.header("retry-after", String(Math.ceil((b.resetAt - now) / 1000)));
+        return apiError(c, 429, "rate_limited", "Too many requests");
+      }
+      b.count += 1;
+    }
+    if (buckets.size > 10_000) for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k);
+    await next();
+  };
+}
+```
+Register in `createApp` right after `lockedCors`: `app.use("*", rateLimit());` (import it). Because `createApp` builds a new `Map` per app instance, tests are isolated.
+
+Run: `pnpm --filter @wayfare/api test` — Expected: rate-limit tests PASS, the earlier tests still PASS (they make fewer than 60 requests per IP; they send no `cf-connecting-ip`, so they share the `unknown` bucket — keep each test file under 60 unauthenticated requests or set distinct IPs).
+
+- [ ] **Step 8: Local smoke**
 
 Run: `cd apps/api && copy .dev.vars.example .dev.vars && pnpm dev`, then in another shell `curl.exe -i http://localhost:8787/health`.
 Expected: `200` with `{"ok":true,"service":"api"}` and the security headers. Stop the dev server.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add apps/api
-git commit -m "feat(api): Hono worker scaffold with locked CORS, security headers and /health"
+git commit -m "feat(api): Hono worker scaffold with locked CORS, security headers, error hygiene and rate-limit baseline"
 ```
 
 ---
@@ -1779,6 +2058,10 @@ export interface TestJwks {
   sign(claims?: Record<string, unknown>, opts?: { expiresIn?: string }): Promise<string>;
   /** Signed with a key that is NOT in the JWKS — must fail verification. */
   signWithForeignKey(claims?: Record<string, unknown>): Promise<string>;
+  /** `alg: "none"` token (what the Firebase Auth emulator issues) — must fail unless emulator mode is on. */
+  unsecured(claims?: Record<string, unknown>): Promise<string>;
+  /** HS256 token signed with a symmetric secret — must always fail (algorithm confusion). */
+  signHs256(claims?: Record<string, unknown>): Promise<string>;
 }
 
 export async function makeTestJwks(): Promise<TestJwks> {
@@ -1804,9 +2087,13 @@ export async function makeTestJwks(): Promise<TestJwks> {
     getKey,
     sign: (claims = {}, opts = {}) => signWith(privateKey, claims, opts.expiresIn ?? "1h"),
     signWithForeignKey: (claims = {}) => signWith(foreign.privateKey, claims, "1h"),
+    unsecured: async (claims = {}) => new UnsecuredJWT(base(claims)).setIssuedAt().setExpirationTime("1h").encode(),
+    signHs256: async (claims = {}) =>
+      new SignJWT(base(claims)).setProtectedHeader({ alg: "HS256", kid: "test-kid" }).setIssuedAt().setExpirationTime("1h").sign(new TextEncoder().encode("not-a-secret-anyone-can-guess")),
   };
 }
 ```
+(Add `UnsecuredJWT` to the `jose` import.)
 
 - [ ] **Step 2: Failing tests**
 
@@ -1835,24 +2122,51 @@ test("valid token → 200 with uid and serverTime", async () => {
   expect(await res.json()).toMatchObject({ ok: true, uid: "abc123", serverTime: NOW.toISOString() });
 });
 
-test("wrong audience, wrong issuer, foreign key, expired, unverified email, empty sub → 401", async () => {
+test.each([
+  ["wrong audience", (j: Awaited<ReturnType<typeof makeTestJwks>>) => j.sign({ aud: "other-project" })],
+  ["wrong issuer", (j) => j.sign({ iss: "https://securetoken.google.com/other" })],
+  ["foreign signing key", (j) => j.signWithForeignKey()],
+  ["expired", (j) => j.sign({ exp: Math.floor(NOW.getTime() / 1000) - 10 })],
+  ["alg none (unsecured)", (j) => j.unsecured()],
+  ["alg HS256 (algorithm confusion)", (j) => j.signHs256()],
+  ["missing sub", (j) => j.sign({ sub: undefined })],
+  ["empty sub", (j) => j.sign({ sub: "" })],
+  ["email_verified false", (j) => j.sign({ email_verified: false })],
+  ["email_verified absent", (j) => j.sign({ email_verified: undefined })],
+  ["auth_time in the future", (j) => j.sign({ auth_time: Math.floor(NOW.getTime() / 1000) + 3600 })],
+] as const)("rejects a token with %s → 401", async (_label, make) => {
   const jwks = await makeTestJwks();
   const app = createApp({ jwks: jwks.getKey, now: () => NOW });
-  const tokens = [
-    await jwks.sign({ aud: "other-project" }),
-    await jwks.sign({ iss: "https://securetoken.google.com/other" }),
-    await jwks.signWithForeignKey(),
-    await jwks.sign({}, { expiresIn: "-1s" }),
-    await jwks.sign({ email_verified: false }),
-    await jwks.sign({ sub: "" }),
-  ];
-  for (const token of tokens) {
-    const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
-    expect(res.status).toBe(401);
+  const token = await make(jwks);
+  const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
+  expect(res.status).toBe(401);
+  expect(await res.json()).toMatchObject({ error: "unauthorized" });
+});
+
+test("malformed Authorization headers → 401 (no scheme, wrong scheme, garbage token)", async () => {
+  const jwks = await makeTestJwks();
+  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  for (const authorization of ["", "Basic abc", "Bearer", "Bearer not.a.jwt", "Token x.y.z"]) {
+    const res = await app.request("/ping", { headers: authorization ? { authorization } : {} }, env);
+    expect(res.status, authorization).toBe(401);
   }
 });
+
+test("emulator mode: unsigned Auth-emulator tokens are accepted ONLY when FIREBASE_AUTH_EMULATOR_HOST is set", async () => {
+  const jwks = await makeTestJwks();
+  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  const token = await jwks.unsecured({ sub: "emu-user" });
+  const prod = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
+  expect(prod.status).toBe(401);
+  const dev = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, { ...env, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" });
+  expect(dev.status).toBe(200);
+  expect(await dev.json()).toMatchObject({ uid: "emu-user" });
+  // even in emulator mode, iss/aud/exp/email_verified still apply
+  const badAud = await app.request("/ping", { headers: { authorization: `Bearer ${await jwks.unsecured({ aud: "other" })}` } }, { ...env, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" });
+  expect(badAud.status).toBe(401);
+});
 ```
-Note: the `expiresIn: "-1s"` case relies on `verifyIdToken` receiving `now` = `NOW`; jose validates `exp` against `currentDate`, and the helper sets `exp` relative to the real clock, which is later than `NOW` — so also add a case `await jwks.sign({ exp: Math.floor(NOW.getTime() / 1000) - 10 })` and drop the `-1s` one if jose rejects negative durations.
+(Once Task 9 lands, these tests also pass `fetchImpl: fakeFirestore().fetchImpl` and the `FIREBASE_SERVICE_ACCOUNT` env override, as described there.)
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -1863,7 +2177,7 @@ Expected: FAIL — `/ping` is 404 and `./middleware` is missing.
 
 `apps/api/src/auth/verifyIdToken.ts`:
 ```ts
-import { type JWTVerifyGetKey, createRemoteJWKSet, jwtVerify } from "jose";
+import { type JWTVerifyGetKey, UnsecuredJWT, createRemoteJWKSet, jwtVerify } from "jose";
 
 export interface AuthUser {
   uid: string;
@@ -1890,17 +2204,28 @@ export function firebaseJwks(): JWTVerifyGetKey {
   return cached;
 }
 
+export interface VerifyOptions {
+  /**
+   * Dev only. When true, accept the Auth emulator's unsigned (`alg: "none"`) tokens
+   * but still enforce iss/aud/exp/sub/email_verified. The Worker sets this solely
+   * from `env.FIREBASE_AUTH_EMULATOR_HOST`, which dev.bat passes via `wrangler dev --var`
+   * and which is never defined in production.
+   */
+  emulator?: boolean;
+}
+
 /** Spec §8: RS256, iss, aud, exp, sub non-empty, email_verified === true. */
-export async function verifyIdToken(token: string, projectId: string, getKey: JWTVerifyGetKey, now: Date): Promise<AuthUser> {
+export async function verifyIdToken(token: string, projectId: string, getKey: JWTVerifyGetKey, now: Date, opts: VerifyOptions = {}): Promise<AuthUser> {
   let payload: Record<string, unknown>;
+  const expectedIss = `https://securetoken.google.com/${projectId}`;
   try {
-    const res = await jwtVerify(token, getKey, {
-      algorithms: ["RS256"],
-      issuer: `https://securetoken.google.com/${projectId}`,
-      audience: projectId,
-      currentDate: now,
-    });
-    payload = res.payload as Record<string, unknown>;
+    if (opts.emulator && token.split(".")[0] && JSON.parse(atob(token.split(".")[0] ?? "")).alg === "none") {
+      const { payload: p } = UnsecuredJWT.decode(token, { issuer: expectedIss, audience: projectId, currentDate: now });
+      payload = p as Record<string, unknown>;
+    } else {
+      const res = await jwtVerify(token, getKey, { algorithms: ["RS256"], issuer: expectedIss, audience: projectId, currentDate: now });
+      payload = res.payload as Record<string, unknown>;
+    }
   } catch (e) {
     throw new AuthError("invalid", `Token verification failed: ${(e as Error).message}`);
   }
@@ -1927,7 +2252,9 @@ export const firebaseAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!token) return apiError(c, 401, "unauthorized", "Missing bearer token");
   const deps = c.get("deps");
   try {
-    const user = await verifyIdToken(token, c.env.FIREBASE_PROJECT_ID, deps.jwks ?? firebaseJwks(), deps.now());
+    const emulator = Boolean(c.env.FIREBASE_AUTH_EMULATOR_HOST);
+    if (emulator) console.warn(JSON.stringify({ level: "warn", message: "AUTH EMULATOR MODE: accepting unsigned tokens" }));
+    const user = await verifyIdToken(token, c.env.FIREBASE_PROJECT_ID, deps.jwks ?? firebaseJwks(), deps.now(), { emulator });
     c.set("user", user);
   } catch (e) {
     return apiError(c, 401, "unauthorized", e instanceof AuthError ? e.message : "Invalid token");
@@ -2024,6 +2351,26 @@ test("admin routes still require a valid token", async () => {
   const { app } = await setup();
   expect((await app.request("/admin/ping", {}, env)).status).toBe(401);
 });
+
+test("non-admin gets 403 on EVERY /admin/* route, including unknown ones (guard runs before routing)", async () => {
+  const { jwks, app } = await setup();
+  const token = await jwks.sign({ sub: "someone-else", auth_time: nowSec - 10 });
+  for (const [method, path] of [["GET", "/admin/ping"], ["POST", "/admin/echo"], ["POST", "/admin/llm/ping"], ["GET", "/admin/does-not-exist"], ["DELETE", "/admin/users/x"]] as const) {
+    const res = await app.request(path, { method, headers: { authorization: `Bearer ${token}` } }, env);
+    expect(res.status, `${method} ${path}`).toBe(403);
+  }
+});
+
+test("ADMIN_UIDS parsing ignores whitespace and empty entries; an empty secret grants nobody", async () => {
+  const { parseAdminUids } = await import("../src/auth/admin");
+  expect([...parseAdminUids(" a , b ,, c ,")]).toEqual(["a", "b", "c"]);
+  expect(parseAdminUids("").size).toBe(0);
+  expect(parseAdminUids(" , ").size).toBe(0);
+  const { jwks, app } = await setup();
+  const token = await jwks.sign({ sub: "admin-uid-1", auth_time: nowSec - 10 });
+  const res = await app.request("/admin/ping", { headers: { authorization: `Bearer ${token}` } }, { ...env, ADMIN_UIDS: "" });
+  expect(res.status).toBe(403);
+});
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -2072,6 +2419,7 @@ import { requireAdmin } from "../auth/admin";
 import { firebaseAuth } from "../auth/middleware";
 
 export const adminRoutes = new Hono<AppEnv>();
+// Guard first, for every method and path under /admin — unknown admin paths return 403 to non-admins, not 404.
 adminRoutes.use("*", firebaseAuth, requireAdmin());
 
 adminRoutes.get("/ping", (c) => {
@@ -2255,7 +2603,7 @@ import { TEST_SA_JSON } from "./helpers/testPem";
 import { makeTestJwks } from "./helpers/tokens";
 
 const NOW = new Date("2026-09-20T12:00:00Z");
-const withSa = { ...env, FIREBASE_SERVICE_ACCOUNT_JSON: TEST_SA_JSON };
+const withSa = { ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON };
 
 test("first ping creates the user and bumps totals; second ping the same day changes nothing", async () => {
   const jwks = await makeTestJwks();
@@ -2294,6 +2642,25 @@ test("service-account token is cached in KV", async () => {
   await app.request("/ping", { headers: { authorization: `Bearer ${await jwks.sign({ sub: "u3" })}` } }, withSa);
   expect(await env.CONFIG_KV.get("sa_access_token")).toBe("T");
 });
+
+test("FIRESTORE_EMULATOR_HOST routes REST calls to the emulator over http with the 'owner' token and no service account", async () => {
+  const jwks = await makeTestJwks();
+  const seen: { url: string; auth: string | null }[] = [];
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    seen.push({ url, auth: new Headers(init?.headers).get("authorization") });
+    return new Response("{}", { status: url.includes(":commit") || init?.method === "PATCH" ? 200 : 404 });
+  };
+  const app = createApp({ jwks: jwks.getKey, now: () => NOW, fetchImpl });
+  const res = await app.request(
+    "/ping",
+    { headers: { authorization: `Bearer ${await jwks.sign({ sub: "u4" })}` } },
+    { ...env, FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080", FIREBASE_SERVICE_ACCOUNT: "" }, // no SA needed in emulator mode
+  );
+  expect(res.status).toBe(200);
+  expect(seen[0]?.url).toMatch(/^http:\/\/127\.0\.0\.1:8080\/v1\/projects\/test-project\/databases\/\(default\)\/documents\/users\/u4$/);
+  expect(seen.every((s) => s.auth === "Bearer owner")).toBe(true);
+  expect(seen.some((s) => s.url.startsWith("https://oauth2.googleapis.com"))).toBe(false);
+});
 ```
 
 - [ ] **Step 4: Run to verify failure**
@@ -2318,7 +2685,7 @@ const SCOPE = "https://www.googleapis.com/auth/datastore";
 
 export function parseServiceAccount(raw: string): ServiceAccount {
   const obj = JSON.parse(raw) as Partial<ServiceAccount>;
-  if (!obj.client_email || !obj.private_key) throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing client_email/private_key");
+  if (!obj.client_email || !obj.private_key) throw new Error("FIREBASE_SERVICE_ACCOUNT is missing client_email/private_key");
   return { client_email: obj.client_email, private_key: obj.private_key };
 }
 
@@ -2406,15 +2773,19 @@ export interface FirestoreClientOptions {
   projectId: string;
   tokenProvider: () => Promise<string>;
   fetchImpl: FetchLike;
+  /** Defaults to https://firestore.googleapis.com; dev.bat points it at the emulator (http://127.0.0.1:8080). */
+  host?: string;
 }
 
 export class FirestoreClient {
   private readonly docRoot: string;
+  private readonly apiRoot: string;
   private readonly base: string;
 
   constructor(private readonly opts: FirestoreClientOptions) {
     this.docRoot = `projects/${opts.projectId}/databases/(default)/documents`;
-    this.base = `https://firestore.googleapis.com/v1/${this.docRoot}`;
+    this.apiRoot = `${opts.host ?? "https://firestore.googleapis.com"}/v1`;
+    this.base = `${this.apiRoot}/${this.docRoot}`;
   }
 
   private async call(url: string, init: RequestInit = {}, allow404 = false): Promise<Response> {
@@ -2449,13 +2820,14 @@ export class FirestoreClient {
       fieldPath,
       increment: Number.isInteger(n) ? { integerValue: String(n) } : { doubleValue: n },
     }));
-    await this.call(`https://firestore.googleapis.com/v1/${this.docRoot}:commit`, {
+    await this.call(`${this.apiRoot}/${this.docRoot}:commit`, {
       method: "POST",
       body: JSON.stringify({ writes: [{ transform: { document: `${this.docRoot}/${path}`, fieldTransforms } }] }),
     });
   }
 }
 ```
+(Update the `incrementFields` test expectation in `firestore.test.ts` accordingly — it already asserts the full `https://firestore.googleapis.com/v1/...:commit` URL, which is unchanged for the default host.)
 
 - [ ] **Step 7: Implement the `/ping` route with Firestore**
 
@@ -2471,7 +2843,11 @@ import { FirestoreClient } from "../firestore/client";
 import { getAccessToken, parseServiceAccount } from "../firestore/serviceAccount";
 
 export function firestoreFor(env: Env, fetchImpl: FetchLike, now: () => Date): FirestoreClient {
-  const sa = parseServiceAccount(env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  // Emulator mode (dev.bat only): plain http to the emulator, fixed "owner" bearer, no service account.
+  if (env.FIRESTORE_EMULATOR_HOST) {
+    return new FirestoreClient({ projectId: env.FIREBASE_PROJECT_ID, fetchImpl, host: `http://${env.FIRESTORE_EMULATOR_HOST}`, tokenProvider: async () => "owner" });
+  }
+  const sa = parseServiceAccount(env.FIREBASE_SERVICE_ACCOUNT);
   return new FirestoreClient({
     projectId: env.FIREBASE_PROJECT_ID,
     fetchImpl,
@@ -2515,7 +2891,7 @@ pingRoutes.get("/", firebaseAuth, async (c) => {
 
 In `app.ts`: delete the inline `/ping` handler and its imports; add `import { pingRoutes } from "./routes/ping";` and `app.route("/ping", pingRoutes);`.
 
-Update `apps/api/test/auth.test.ts`: create the app with `fetchImpl: fakeFirestore().fetchImpl` and pass `{ ...env, FIREBASE_SERVICE_ACCOUNT_JSON: TEST_SA_JSON }` as the env argument in every `app.request` call, so the valid-token test still returns 200.
+Update `apps/api/test/auth.test.ts`: create the app with `fetchImpl: fakeFirestore().fetchImpl` and pass `{ ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON }` as the env argument in every `app.request` call, so the valid-token test still returns 200.
 
 - [ ] **Step 8: Run tests, lint, typecheck**
 
@@ -2666,7 +3042,7 @@ test("admin llm ping falls back from an exhausted Gemini model to the next and r
   };
   const app = createApp({ jwks: jwks.getKey, now: () => NOW, fetchImpl });
   const token = await jwks.sign({ sub: "admin-uid-1", auth_time: Math.floor(NOW.getTime() / 1000) - 30 });
-  const res = await app.request("/admin/llm/ping", { method: "POST", headers: { authorization: `Bearer ${token}` } }, { ...env, FIREBASE_SERVICE_ACCOUNT_JSON: TEST_SA_JSON });
+  const res = await app.request("/admin/llm/ping", { method: "POST", headers: { authorization: `Bearer ${token}` } }, { ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON });
   expect(res.status).toBe(200);
   const body = await res.json<{ modelUsed: string; attempts: { modelId: string; outcome: string }[] }>();
   expect(body.modelUsed).toBe("gemini-3.7-flash");
@@ -2685,7 +3061,7 @@ test("when every model fails the route answers 503 upstream_exhausted", async ()
       : fs.fetchImpl(url, init);
   const app = createApp({ jwks: jwks.getKey, now: () => NOW, fetchImpl });
   const token = await jwks.sign({ sub: "admin-uid-1", auth_time: Math.floor(NOW.getTime() / 1000) - 30 });
-  const res = await app.request("/admin/llm/ping", { method: "POST", headers: { authorization: `Bearer ${token}` } }, { ...env, FIREBASE_SERVICE_ACCOUNT_JSON: TEST_SA_JSON });
+  const res = await app.request("/admin/llm/ping", { method: "POST", headers: { authorization: `Bearer ${token}` } }, { ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON });
   expect(res.status).toBe(503);
   expect(await res.json()).toMatchObject({ error: "upstream_exhausted" });
 });
@@ -2810,12 +3186,21 @@ export default defineConfig({ test: { globals: true, include: ["test/**/*.test.t
           }
         ]
       },
+      { "source": "**/*.html", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
+      { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }] },
       { "source": "/assets/**", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] }
     ]
   },
-  "emulators": { "firestore": { "port": 8080 }, "ui": { "enabled": false } }
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
 }
 ```
+
+Why users always get the newest build after `prod.bat`: Vite emits every JS/CSS asset under `/assets/` with a content hash in the file name (immutable, cached for a year), while `index.html` — the only file that references those hashes — is served with `Cache-Control: no-cache, no-store, must-revalidate`, so every page load fetches the current `index.html` and therefore the current asset set. The SPA rewrite serves `index.html` for every route, so the `/` and `**/*.html` header rules cover all entry points. No manual cache clearing is ever needed.
 
 - [ ] **Step 2: Failing rules tests**
 
@@ -2884,6 +3269,37 @@ test("unverified email is treated as anonymous", async () => {
 test("unknown collections are denied", async () => {
   await assertFails(getDoc(doc(asUser(ADMIN_UID), "plans/anything")));
 });
+
+const ALL_COLLECTIONS = ["users/alice", "users/alice/usage/2026-09", "plans/p1", "plans/p1/versions/v1", "config/current", "configVersions/1", "metrics/global", "metricsDaily/2026-09-20", "usageDaily/google_2026-09-20", "llmModels/m", "auditLog/a", "places/x", "shares/s"];
+
+test.each(ALL_COLLECTIONS)("anonymous cannot read or write %s", async (path) => {
+  await assertFails(getDoc(doc(anon(), path)));
+  await assertFails(setDoc(doc(anon(), path), { x: 1 }));
+});
+
+test("a user cannot read or write another user's users/* or plans/*", async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), "plans/bobs-plan"), { ownerUid: "bob" });
+    await setDoc(doc(ctx.firestore(), "users/bob/usage/2026-09"), { plansCreated: 1 });
+  });
+  await assertFails(getDoc(doc(asUser("alice"), "users/bob/usage/2026-09")));
+  await assertFails(setDoc(doc(asUser("alice"), "users/bob"), { tier: "free" }));
+  await assertFails(getDoc(doc(asUser("alice"), "plans/bobs-plan")));
+  await assertFails(setDoc(doc(asUser("alice"), "plans/bobs-plan"), { ownerUid: "alice" }));
+});
+
+test.each(["config/current", "configVersions/1", "llmModels/m", "usageDaily/google_2026-09-20", "metrics/global", "metricsDaily/2026-09-20", "auditLog/a"])(
+  "client writes to %s are denied even for the admin UID",
+  async (path) => {
+    await assertFails(setDoc(doc(asUser(ADMIN_UID), path), { hacked: true }));
+    await assertFails(setDoc(doc(asUser("alice"), path), { hacked: true }));
+  },
+);
+
+test("admin UID can read config/current (like any signed-in user) and admin-only telemetry", async () => {
+  await assertSucceeds(getDoc(doc(asUser(ADMIN_UID), "config/current")));
+  await assertSucceeds(getDoc(doc(asUser(ADMIN_UID), "metrics/global")));
+});
 ```
 
 - [ ] **Step 3: Run to verify failure**
@@ -2948,7 +3364,7 @@ service cloud.firestore {
 - [ ] **Step 5: Run the rules tests**
 
 Run: `pnpm --filter @wayfare/firebase-rules test`
-Expected: all 7 tests PASS.
+Expected: all tests PASS (7 named tests + the parameterised anonymous/collection and admin-write sweeps).
 
 - [ ] **Step 6: Deploy the rules once (manual)**
 
@@ -2969,7 +3385,7 @@ git commit -m "feat(infra): Firestore security rules with emulator tests; hostin
 **Files:**
 - Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `apps/web/vite.config.ts`, `apps/web/index.html`, `apps/web/.env.example`, `apps/web/src/index.css`, `apps/web/src/vite-env.d.ts`
 - Create: `apps/web/src/main.tsx`, `apps/web/src/routes/__root.tsx`, `apps/web/src/routes/index.tsx`, `apps/web/src/routes/admin.tsx`
-- Create: `apps/web/src/lib/firebase.ts`, `apps/web/src/lib/useAuth.ts`, `apps/web/src/lib/api.ts`
+- Create: `apps/web/src/lib/firebase.ts`, `apps/web/src/lib/emulators.ts`, `apps/web/src/lib/useAuth.ts`, `apps/web/src/lib/api.ts`, `apps/web/src/test/emulators.test.ts`, `tools/test/bundleSecrets.test.ts`
 - Create: `apps/web/src/i18n/index.ts`, `apps/web/src/i18n/en.json`, `apps/web/src/i18n/he.json`, `apps/web/src/components/LanguageSelect.tsx`
 - Create: `apps/web/src/test/setup.ts`, `apps/web/src/test/i18n.test.ts`, `apps/web/src/test/api.test.ts`, `apps/web/src/test/LanguageSelect.test.tsx`
 - Generated by shadcn: `apps/web/components.json`, `apps/web/src/lib/utils.ts`, `apps/web/src/components/ui/button.tsx`
@@ -3072,7 +3488,9 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_AUTH_DOMAIN: string;
   readonly VITE_FIREBASE_PROJECT_ID: string;
   readonly VITE_FIREBASE_APP_ID: string;
-  readonly VITE_API_BASE_URL: string;
+  readonly VITE_API_URL: string;
+  /** "1" → connect the Firebase SDK to local emulators (set by dev.bat). */
+  readonly VITE_USE_EMULATORS?: string;
 }
 ```
 
@@ -3100,7 +3518,8 @@ VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=<project>
 VITE_FIREBASE_APP_ID=
-VITE_API_BASE_URL=http://localhost:8787
+VITE_API_URL=http://127.0.0.1:8787
+VITE_USE_EMULATORS=0
 ```
 
 Initialise shadcn (creates `components.json`, `src/lib/utils.ts`, `src/components/ui/button.tsx`): `cd apps/web && pnpm dlx shadcn@latest init -d && pnpm dlx shadcn@latest add button`. If the generator asks for a CSS file, point it at `src/index.css`.
@@ -3235,7 +3654,7 @@ export class ApiClientError extends Error {
   }
 }
 
-const BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const BASE = import.meta.env.VITE_API_URL ?? "";
 
 export async function apiFetch<T>(path: string, schema: ZodType<T>, init: RequestInit & { token?: string | null } = {}): Promise<T> {
   const { token, ...rest } = init;
@@ -3254,10 +3673,47 @@ export async function apiFetch<T>(path: string, schema: ZodType<T>, init: Reques
 
 - [ ] **Step 5: Firebase auth wiring**
 
+First a failing test for emulator wiring — `apps/web/src/test/emulators.test.ts`:
+```ts
+import type { Auth } from "firebase/auth";
+
+const connectAuthEmulator = vi.fn();
+vi.mock("firebase/auth", async (importOriginal) => ({ ...(await importOriginal<typeof import("firebase/auth")>()), connectAuthEmulator }));
+
+import { configureEmulators } from "../lib/emulators";
+
+const fakeAuth = {} as Auth;
+
+test("connects Auth to the emulator only when VITE_USE_EMULATORS === '1'", () => {
+  configureEmulators(fakeAuth, { VITE_USE_EMULATORS: "1" });
+  expect(connectAuthEmulator).toHaveBeenCalledWith(fakeAuth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectAuthEmulator.mockClear();
+  configureEmulators(fakeAuth, { VITE_USE_EMULATORS: "0" });
+  configureEmulators(fakeAuth, {});
+  expect(connectAuthEmulator).not.toHaveBeenCalled();
+});
+```
+Run: `pnpm --filter @wayfare/web test` — Expected: FAIL (`../lib/emulators` missing).
+
+`apps/web/src/lib/emulators.ts`:
+```ts
+import { type Auth, connectAuthEmulator } from "firebase/auth";
+
+/**
+ * dev.bat sets VITE_USE_EMULATORS=1 so the SDK talks to the local Auth emulator
+ * (and, once the web app uses the Firestore SDK in later phases, connectFirestoreEmulator
+ * is added here too). Production builds never define this variable.
+ */
+export function configureEmulators(auth: Auth, env: { VITE_USE_EMULATORS?: string }): void {
+  if (env.VITE_USE_EMULATORS === "1") connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
+```
+
 `apps/web/src/lib/firebase.ts`:
 ```ts
 import { initializeApp } from "firebase/app";
 import { GoogleAuthProvider, browserLocalPersistence, getAuth, setPersistence, signInWithPopup, signInWithRedirect } from "firebase/auth";
+import { configureEmulators } from "./emulators";
 
 const app = initializeApp({
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -3267,6 +3723,7 @@ const app = initializeApp({
 });
 
 export const auth = getAuth(app);
+configureEmulators(auth, import.meta.env);
 void setPersistence(auth, browserLocalPersistence);
 
 const provider = new GoogleAuthProvider();
@@ -3502,11 +3959,51 @@ function Admin() {
 Run: `pnpm --filter @wayfare/web test && pnpm --filter @wayfare/web build && pnpm lint && pnpm typecheck`
 Expected: tests PASS; `dist/` produced; `src/routeTree.gen.ts` generated (commit it; Biome ignores it).
 
+- [ ] **Step 8b: Bundle secret scan — the built app must contain no server secrets** (security)
+
+`tools/test/bundleSecrets.test.ts` (runs against `apps/web/dist`; CI runs it right after the web build — Task 15):
+```ts
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+const DIST = resolve(import.meta.dirname, "../../apps/web/dist");
+const PATTERNS: [RegExp, string][] = [
+  [/sk-or-v1-[0-9a-f]{64}/, "OpenRouter key"],
+  [/tvly-[0-9A-Za-z_-]{20,}/, "Tavily key"],
+  [/"private_key"/, "service-account private key field"],
+  [/-----BEGIN (RSA |EC )?PRIVATE KEY-----/, "private key block"],
+  [/securetoken@system\.gserviceaccount\.com/, "server-side JWKS URL (Worker code leaked into the bundle)"],
+  [/oauth2\.googleapis\.com\/token/, "service-account token exchange (Worker code leaked into the bundle)"],
+];
+// The Firebase web apiKey (AIza…) is public by design and expected in the bundle; it is NOT a secret and is not scanned.
+
+function walk(dir: string): string[] {
+  return readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    return statSync(p).isDirectory() ? walk(p) : p.endsWith(".js") || p.endsWith(".css") || p.endsWith(".html") ? [p] : [];
+  });
+}
+
+const skip = !existsSync(DIST);
+(skip ? test.skip : test)("apps/web/dist contains no server secrets", () => {
+  const files = walk(DIST);
+  expect(files.length).toBeGreaterThan(0);
+  const hits: string[] = [];
+  for (const f of files) {
+    const text = readFileSync(f, "utf8");
+    for (const [re, label] of PATTERNS) if (re.test(text)) hits.push(`${label} in ${f}`);
+  }
+  expect(hits).toEqual([]);
+});
+```
+Add a root script `"scan:bundle": "pnpm --filter @wayfare/web build && pnpm --filter @wayfare/tools exec vitest run test/bundleSecrets.test.ts"`.
+Run: `pnpm scan:bundle` — Expected: PASS. Negative check: temporarily add `const leak = "sk-or-v1-" + "a".repeat(64);` to `src/main.tsx`, rebuild, run — Expected: FAIL naming the file; revert.
+
 - [ ] **Step 9: Local end-to-end smoke**
 
-1. `copy apps\web\.env.example apps\web\.env` and fill from Task 0 Step 2.4.
-2. In `apps/api/.dev.vars` set `ALLOWED_ORIGIN=http://localhost:5173`, paste the service-account JSON (single line) into `FIREBASE_SERVICE_ACCOUNT_JSON`, and both LLM keys.
-3. Run `pnpm --filter @wayfare/api dev` and `pnpm --filter @wayfare/web dev`; open http://localhost:5173, sign in with Google, click **Call protected /ping**.
+1. `copy apps\web\.env.example apps\web\.env` and fill from Task 0 Step 2.4 (keep `VITE_USE_EMULATORS=0` for this real-Google smoke).
+2. In `apps/api/.dev.vars` set `ALLOWED_ORIGIN=http://localhost:5173`, paste the service-account JSON (single line) into `FIREBASE_SERVICE_ACCOUNT`, and the LLM keys.
+3. Run `pnpm --filter @wayfare/api dev` and `pnpm --filter @wayfare/web dev`; open http://localhost:5173, sign in with Google, click **Call protected /ping**. (From Task 14 on, `dev.bat` replaces these two commands and runs against emulators.)
 Expected: server time and your uid appear; Firestore console shows `users/<uid>`, `metrics/global`, `metricsDaily/<today>`. **Write down your uid** for Task 13.
 
 - [ ] **Step 10: Commit**
@@ -3528,13 +4025,15 @@ git commit -m "feat(web): Vite React shell with TanStack Router, Tailwind, i18n 
 
 ```powershell
 cd apps/api
-pnpm dlx wrangler@4 secret put ADMIN_UIDS                    # your uid from Task 12 Step 9
 pnpm dlx wrangler@4 secret put GEMINI_API_KEY
 pnpm dlx wrangler@4 secret put OPENROUTER_API_KEY
-pnpm dlx wrangler@4 secret put FIREBASE_SERVICE_ACCOUNT_JSON # the whole JSON on one line
+pnpm dlx wrangler@4 secret put TAVILY_API_KEY
+pnpm dlx wrangler@4 secret put ADMIN_UIDS                # your uid from Task 12 Step 9
+pnpm dlx wrangler@4 secret put FIREBASE_SERVICE_ACCOUNT  # the whole JSON on one line
 pnpm dlx wrangler@4 deploy
 ```
-Expected: a URL like `https://wayfare-api.<subdomain>.workers.dev`; `curl.exe https://wayfare-api.<subdomain>.workers.dev/health` → `{"ok":true,"service":"api"}`. Set the GitHub variable `VITE_API_BASE_URL` to this URL.
+(From Task 14 on, `prod.bat` syncs these five secrets from the repo-root `.env` automatically whenever the API is deployed.)
+Expected: a URL like `https://wayfare-api.<subdomain>.workers.dev`; `curl.exe https://wayfare-api.<subdomain>.workers.dev/health` → `{"ok":true,"service":"api"}`. Set the GitHub variable `VITE_API_URL` to this URL.
 
 - [ ] **Step 2: Lock the admin UID in rules and deploy the rules**
 
@@ -3549,7 +4048,7 @@ VITE_FIREBASE_API_KEY=
 VITE_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=<project>
 VITE_FIREBASE_APP_ID=
-VITE_API_BASE_URL=https://wayfare-api.<subdomain>.workers.dev
+VITE_API_URL=https://wayfare-api.<subdomain>.workers.dev
 ```
 Create `apps/web/.env.production` from it. In `infra/firebase/firebase.json` replace `<cf-subdomain>` and `<project>` in the CSP. Then:
 ```powershell
@@ -3578,7 +4077,525 @@ git commit -m "chore: production origin, admin uid in rules, hosting CSP for the
 
 ---
 
-### Task 14: CI and CD on GitHub Actions
+### Task 14: `dev.bat` and `prod.bat` — one-command local stack and guarded production deploy
+
+**Files:**
+- Create: `dev.bat`, `prod.bat` (repo root)
+- Verify: `.gitignore` covers `.env`, `.dev.vars` (Task 1's `tools/test/gitignore.test.ts` already asserts both — re-run it here)
+- Depends on: `infra/firebase/firebase.json` emulators block (auth 9099, firestore 8080, UI 4000 — Task 11), Worker emulator support (`FIREBASE_AUTH_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST` — Tasks 7 and 9), web emulator support (`VITE_USE_EMULATORS` — Task 12), Hosting `index.html` no-cache header (Task 11).
+
+**Interfaces:**
+- Produces: `dev.bat [--all|--app|--api|--emulators]`, `prod.bat [--all|--app|--api|--rules|--build-only]`. Both scripts are modelled on `c:\Lexor\dev.bat` / `c:\Lexor\deploy.bat` and keep their conventions: ANSI colours via `for /F %%a in ('echo prompt $E ^| cmd')`, `[INFO]/[WARN]/[ERROR]` prefixes, `npx -y concurrently -c … -n …`, placeholder secret-file creation, "Services configured" summary, `:parse_args` loop, interactive numbered menu when no args, `DEPLOY_TARGETS` accumulation, secrets-sync block with temp file + delete, `[BUILD]/[OK]/[DEPLOY]` lines, `:error`/`:end` labels.
+- Env var names are exactly those of the Global Constraints: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT`, `VITE_API_URL`, `VITE_USE_EMULATORS`, `FIREBASE_AUTH_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`.
+
+Why wrangler gets `--var` instead of `set X=…&&`: `wrangler dev` does not copy arbitrary process environment variables into the Worker's `env` bindings; `--var NAME:VALUE` does. Vite, by contrast, does read `VITE_*` from the process environment, so `set VITE_…&&` works for the app.
+
+- [ ] **Step 1: Write `dev.bat`**
+
+```bat
+@echo off
+REM Wayfare Local Development Launcher
+REM ==================================
+REM Usage: dev.bat [option]
+REM
+REM Options:
+REM   (no args)      Start emulators + API + app (same as --all)
+REM   --all          Firebase emulators (Auth + Firestore), Cloudflare Worker, Vite app
+REM   --emulators    Firebase Auth + Firestore emulators only (Emulator UI on :4000)
+REM   --api          Cloudflare Worker via wrangler dev on :8787, pointed at the emulators
+REM   --app          Vite app on :5173, pointed at the local Worker and the emulators
+REM
+REM Hot reload: Vite serves the app with HMR, so app changes appear the moment you save;
+REM wrangler dev rebuilds the Worker on save, so API changes apply on the next request
+REM (refresh the page). Emulator data lives in memory and resets when you stop it.
+REM
+REM Secrets: apps\api\.dev.vars (git-ignored) is created with empty placeholders on first
+REM run. Fill GEMINI_API_KEY / OPENROUTER_API_KEY to exercise the LLM chain locally.
+
+setlocal enabledelayedexpansion
+
+for /F %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
+set "RED=!ESC![0;31m"
+set "GREEN=!ESC![0;32m"
+set "YELLOW=!ESC![1;33m"
+set "BLUE=!ESC![0;34m"
+set "MAGENTA=!ESC![0;35m"
+set "NC=!ESC![0m"
+
+set "FIREBASE_PROJECT=<project>"
+set "API_URL=http://127.0.0.1:8787"
+set "APP_URL=http://localhost:5173"
+set "AUTH_EMULATOR=127.0.0.1:9099"
+set "FIRESTORE_EMULATOR=127.0.0.1:8080"
+
+set START_APP=0
+set START_API=0
+set START_EMU=0
+
+if "%~1"=="--all" (
+    set START_APP=1
+    set START_API=1
+    set START_EMU=1
+) else if "%~1"=="--app" (
+    set START_APP=1
+) else if "%~1"=="--api" (
+    set START_API=1
+) else if "%~1"=="--emulators" (
+    set START_EMU=1
+) else (
+    echo !YELLOW![WARN]!NC! No flag provided, starting emulators + API + app.
+    set START_APP=1
+    set START_API=1
+    set START_EMU=1
+)
+
+echo !BLUE![INFO]!NC! Checking tools...
+where node >nul 2>&1
+if errorlevel 1 (
+    echo !RED![ERROR]!NC! node not found on PATH. Install Node 22 LTS ^(https://nodejs.org^).
+    exit /b 1
+)
+where pnpm >nul 2>&1
+if errorlevel 1 (
+    echo !RED![ERROR]!NC! pnpm not found on PATH. Run: corepack enable ^&^& corepack prepare pnpm@latest --activate
+    exit /b 1
+)
+if "!START_EMU!"=="1" (
+    where java >nul 2>&1
+    if errorlevel 1 (
+        echo !RED![ERROR]!NC! java not found on PATH. The Firestore emulator needs a JDK: winget install EclipseAdoptium.Temurin.21.JDK
+        exit /b 1
+    )
+)
+
+echo !BLUE![INFO]!NC! Preparing dependencies...
+if not exist node_modules (
+    echo !GREEN![DEPS]!NC! Installing workspace dependencies...
+    call pnpm install
+    if errorlevel 1 (
+        echo !RED![ERROR]!NC! pnpm install failed.
+        exit /b 1
+    )
+)
+
+if "!START_API!"=="1" (
+    if not exist apps\api\.dev.vars (
+        echo !YELLOW![INFO]!NC! Creating apps\api\.dev.vars with empty local secret placeholders.
+        > apps\api\.dev.vars echo ALLOWED_ORIGIN=!APP_URL!
+        >> apps\api\.dev.vars echo GEMINI_API_KEY=
+        >> apps\api\.dev.vars echo OPENROUTER_API_KEY=
+        >> apps\api\.dev.vars echo TAVILY_API_KEY=
+        >> apps\api\.dev.vars echo ADMIN_UIDS=
+        >> apps\api\.dev.vars echo FIREBASE_SERVICE_ACCOUNT=
+    )
+)
+
+set CMD=npx -y concurrently
+set NAMES=
+set COLORS=
+set COMMANDS=
+
+if "!START_EMU!"=="1" (
+    set NAMES=EMU
+    set COLORS=green
+    set COMMANDS="cd infra\firebase && pnpm exec firebase emulators:start --only auth,firestore --project !FIREBASE_PROJECT!"
+)
+
+if "!START_API!"=="1" (
+    rem With emulators, the Worker verifies emulator tokens and talks to the local Firestore.
+    rem Without them (--api alone) it uses the real project via .dev.vars, exactly like production.
+    if "!START_EMU!"=="1" (
+        set "API_CMD=cd apps\api && pnpm exec wrangler dev --port 8787 --var FIREBASE_AUTH_EMULATOR_HOST:!AUTH_EMULATOR! --var FIRESTORE_EMULATOR_HOST:!FIRESTORE_EMULATOR!"
+    ) else (
+        set "API_CMD=cd apps\api && pnpm exec wrangler dev --port 8787"
+    )
+    if "!NAMES!"=="" (
+        set NAMES=API
+        set COLORS=magenta
+        set COMMANDS="!API_CMD!"
+    ) else (
+        set NAMES=!NAMES!,API
+        set COLORS=!COLORS!,magenta
+        set COMMANDS=!COMMANDS! "!API_CMD!"
+    )
+)
+
+if "!START_APP!"=="1" (
+    if "!START_EMU!"=="1" (
+        set "APP_CMD=cd apps\web && set VITE_API_URL=!API_URL!&& set VITE_USE_EMULATORS=1&& pnpm exec vite --port 5173 --strictPort"
+    ) else (
+        set "APP_CMD=cd apps\web && set VITE_API_URL=!API_URL!&& set VITE_USE_EMULATORS=0&& pnpm exec vite --port 5173 --strictPort"
+    )
+    if "!NAMES!"=="" (
+        set NAMES=APP
+        set COLORS=blue
+        set COMMANDS="!APP_CMD!"
+    ) else (
+        set NAMES=!NAMES!,APP
+        set COLORS=!COLORS!,blue
+        set COMMANDS=!COMMANDS! "!APP_CMD!"
+    )
+)
+
+echo.
+echo !BLUE![INFO]!NC! Services configured:
+if "!START_EMU!"=="1" (
+    echo !BLUE![INFO]!NC! Emulator UI:        http://127.0.0.1:4000
+    echo !BLUE![INFO]!NC! Auth emulator:      http://!AUTH_EMULATOR!
+    echo !BLUE![INFO]!NC! Firestore emulator: http://!FIRESTORE_EMULATOR!
+    echo !YELLOW![INFO]!NC! Emulator data is in-memory; sign in with any Google account the emulator UI offers.
+)
+if "!START_API!"=="1" (
+    echo !BLUE![INFO]!NC! API:                !API_URL!/health
+    if "!START_EMU!"=="0" echo !YELLOW![WARN]!NC! API started without emulators: it will use the REAL Firebase project from apps\api\.dev.vars.
+)
+if "!START_APP!"=="1" (
+    echo !BLUE![INFO]!NC! App:                !APP_URL!
+    echo !BLUE![INFO]!NC! Hot reload: save a file and the app updates; API changes apply on the next request.
+)
+echo.
+
+!CMD! -c "!COLORS!" -n "!NAMES!" !COMMANDS!
+
+endlocal
+```
+
+- [ ] **Step 2: Write `prod.bat`**
+
+```bat
+@echo off
+REM Wayfare Production Deployment Script
+REM ====================================
+REM Usage: prod.bat [options]
+REM
+REM Options:
+REM   (no args)          Show interactive menu
+REM   --all              Deploy Worker (API), web app (Hosting) and Firestore rules
+REM   --app              Build and deploy the web app (Firebase Hosting)
+REM   --api              Deploy the Cloudflare Worker (wrangler deploy) + sync secrets
+REM   --rules            Deploy Firestore rules
+REM   --build-only       Build only, don't deploy
+REM
+REM Examples:
+REM   prod.bat --app --rules        Hosting + rules
+REM   prod.bat --api                Worker only, secrets synced from .env
+REM
+REM Preflight (always, before any build): the git working tree must be clean, then
+REM pnpm typecheck, pnpm lint, pnpm test and pnpm audit --audit-level high must pass.
+REM Any failure aborts the deploy.
+REM
+REM When the API is deployed, the five Worker secrets (GEMINI_API_KEY, OPENROUTER_API_KEY,
+REM TAVILY_API_KEY, ADMIN_UIDS, FIREBASE_SERVICE_ACCOUNT) are read from the project-root
+REM .env and pushed with `wrangler secret put` before deploy, so production matches your
+REM local values without a manual step. .env is git-ignored; values must not contain ! or %%.
+REM
+REM Users always get the newest build: Vite emits hashed, immutable assets and
+REM firebase.json serves index.html with Cache-Control: no-cache, so every page load
+REM picks up the new asset hashes. No cache purge is needed.
+
+setlocal enabledelayedexpansion
+
+set DEPLOY_APP=0
+set DEPLOY_API=0
+set DEPLOY_RULES=0
+set BUILD_ONLY=0
+set SHOW_MENU=0
+
+set "FIREBASE_PROJECT=<project>"
+set "WORKER_NAME=wayfare-api"
+set "HOSTING_URL=https://<project>.web.app"
+
+REM If no arguments, show menu
+if "%~1"=="" set SHOW_MENU=1
+
+:parse_args
+if "%~1"=="" goto done_parsing
+if "%~1"=="--all" (
+    set DEPLOY_APP=1
+    set DEPLOY_API=1
+    set DEPLOY_RULES=1
+)
+if "%~1"=="--app" set DEPLOY_APP=1
+if "%~1"=="--api" set DEPLOY_API=1
+if "%~1"=="--rules" set DEPLOY_RULES=1
+if "%~1"=="--build-only" set BUILD_ONLY=1
+shift
+goto parse_args
+:done_parsing
+
+REM A plain --build-only builds every deployable target without pushing.
+if %BUILD_ONLY%==1 if %DEPLOY_APP%==0 if %DEPLOY_API%==0 if %DEPLOY_RULES%==0 (
+    set DEPLOY_APP=1
+    set DEPLOY_API=1
+    set DEPLOY_RULES=1
+)
+
+REM Show interactive menu if no arguments
+if %SHOW_MENU%==1 (
+    echo.
+    echo ========================================
+    echo    Wayfare Deploy Menu
+    echo ========================================
+    echo.
+    echo  1. Deploy ALL ^(Worker + Hosting + Rules^)
+    echo  2. Deploy App only ^(Hosting^)
+    echo  3. Deploy API only ^(Cloudflare Worker^)
+    echo  4. Deploy Firestore Rules only
+    echo  5. Deploy App + API
+    echo  6. Exit
+    echo.
+    set /p choice="Select option (1-6): "
+
+    if "!choice!"=="1" (
+        set DEPLOY_APP=1
+        set DEPLOY_API=1
+        set DEPLOY_RULES=1
+    )
+    if "!choice!"=="2" set DEPLOY_APP=1
+    if "!choice!"=="3" set DEPLOY_API=1
+    if "!choice!"=="4" set DEPLOY_RULES=1
+    if "!choice!"=="5" (
+        set DEPLOY_APP=1
+        set DEPLOY_API=1
+    )
+    if "!choice!"=="6" goto end
+    if "!choice!"=="" goto end
+)
+
+echo.
+echo ========================================
+echo    Wayfare Deployment
+echo ========================================
+echo.
+echo Selected targets:
+if %DEPLOY_API%==1 echo   - Cloudflare Worker: %WORKER_NAME%
+if %DEPLOY_APP%==1 echo   - Web App ^(Firebase Hosting^)
+if %DEPLOY_RULES%==1 echo   - Firestore Rules
+echo.
+
+REM ---------- Preflight: refuse dirty trees and failing checks ----------
+echo [PREFLIGHT] Checking git working tree...
+set DIRTY=
+for /f "delims=" %%L in ('git status --porcelain') do set DIRTY=1
+if defined DIRTY (
+    echo [ERROR] Working tree has uncommitted changes. Commit or stash before deploying.
+    git status --short
+    goto error
+)
+echo [PREFLIGHT] Installing dependencies ^(frozen lockfile^)...
+call pnpm install --frozen-lockfile
+if errorlevel 1 goto error
+echo [PREFLIGHT] Typecheck...
+call pnpm typecheck
+if errorlevel 1 goto error
+echo [PREFLIGHT] Lint...
+call pnpm lint
+if errorlevel 1 goto error
+echo [PREFLIGHT] Tests...
+call pnpm test
+if errorlevel 1 goto error
+echo [PREFLIGHT] Dependency audit ^(high or worse fails^)...
+call pnpm audit --audit-level high
+if errorlevel 1 (
+    echo [ERROR] pnpm audit found high/critical vulnerabilities. Fix or override them before deploying.
+    goto error
+)
+echo [OK] Preflight passed
+echo.
+
+set DEPLOY_TARGETS=
+
+REM Build Web App
+if %DEPLOY_APP%==1 (
+    echo [BUILD] Web app...
+    if not exist "%~dp0apps\web\.env.production" (
+        echo [ERROR] apps\web\.env.production not found. Create it from apps\web\.env.production.example.
+        goto error
+    )
+    call pnpm --filter @wayfare/web build
+    if errorlevel 1 goto error
+    echo [BUILD] Scanning bundle for secrets...
+    call pnpm --filter @wayfare/tools exec vitest run test/bundleSecrets.test.ts
+    if errorlevel 1 (
+        echo [ERROR] Bundle secret scan failed - a server secret is in the client build.
+        goto error
+    )
+    set DEPLOY_TARGETS=!DEPLOY_TARGETS!,hosting
+    echo [OK] Web app built
+    echo.
+)
+
+REM Typecheck Worker (wrangler bundles at deploy time)
+if %DEPLOY_API%==1 (
+    echo [BUILD] Worker typecheck...
+    call pnpm --filter @wayfare/api build
+    if errorlevel 1 goto error
+    echo [OK] Worker ready
+    echo.
+)
+
+REM Add rules target
+if %DEPLOY_RULES%==1 (
+    set DEPLOY_TARGETS=!DEPLOY_TARGETS!,firestore:rules
+)
+
+REM Exit if build-only mode
+if %BUILD_ONLY%==1 (
+    echo ========================================
+    echo    Build Complete (deploy skipped^)
+    echo ========================================
+    goto end
+)
+
+REM Remove leading comma from targets
+if not "!DEPLOY_TARGETS!"=="" (
+    set DEPLOY_TARGETS=!DEPLOY_TARGETS:~1!
+)
+
+REM Sync ALL Worker secrets from .env -> Cloudflare before deploying the Worker
+if %DEPLOY_API%==1 (
+    echo [SECRETS] Syncing Worker secrets from .env to Cloudflare...
+    if not exist "%~dp0.env" (
+        echo [ERROR] .env not found in repo root. Create it from .env.example.
+        goto error
+    )
+    for %%S in (GEMINI_API_KEY OPENROUTER_API_KEY TAVILY_API_KEY ADMIN_UIDS FIREBASE_SERVICE_ACCOUNT) do (
+        set "SECRET_VAL="
+        for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do (
+            if "%%A"=="%%S" set "SECRET_VAL=%%B"
+        )
+        if not defined SECRET_VAL (
+            echo   [WARN] %%S not found or empty in .env - skipping
+        ) else (
+            set "TMPFILE=%TEMP%\wayfare_secret_%%S.tmp"
+            rem <nul set /p writes the value WITHOUT a trailing newline; echo would append CRLF into the secret.
+            <nul set /p "=!SECRET_VAL!" > "!TMPFILE!"
+            cd /d %~dp0apps\api
+            call pnpm exec wrangler secret put %%S < "!TMPFILE!"
+            if errorlevel 1 (
+                del /q "!TMPFILE!" >nul 2>&1
+                echo   [ERROR] Failed to set %%S
+                cd /d %~dp0
+                goto error
+            ) else (
+                echo   [OK] %%S synced
+            )
+            cd /d %~dp0
+            del /q "!TMPFILE!" >nul 2>&1
+        )
+        set "SECRET_VAL="
+    )
+    echo.
+)
+
+REM Deploy Worker (Cloudflare, not Firebase)
+if %DEPLOY_API%==1 (
+    echo [DEPLOY] Cloudflare Worker ^(%WORKER_NAME%^)...
+    cd /d %~dp0apps\api
+    call pnpm exec wrangler deploy
+    if errorlevel 1 (
+        cd /d %~dp0
+        goto error
+    )
+    cd /d %~dp0
+    echo [OK] Worker deployed
+    echo.
+)
+
+REM Execute Firebase deploy with specific targets
+if not "!DEPLOY_TARGETS!"=="" (
+    echo [DEPLOY] Deploying to Firebase...
+    echo Running: firebase deploy --only !DEPLOY_TARGETS! --project %FIREBASE_PROJECT%
+    echo.
+    cd /d %~dp0infra\firebase
+    call pnpm exec firebase deploy --only !DEPLOY_TARGETS! --project %FIREBASE_PROJECT%
+    if errorlevel 1 (
+        cd /d %~dp0
+        goto error
+    )
+    cd /d %~dp0
+) else (
+    if %DEPLOY_API%==0 (
+        echo [WARN] Nothing selected to deploy.
+        goto end
+    )
+)
+
+echo.
+echo ========================================
+echo    Deployment Complete!
+echo ========================================
+echo.
+echo Deployed:
+if %DEPLOY_API%==1 echo   [OK] Cloudflare Worker: %WORKER_NAME%
+if %DEPLOY_APP%==1 echo   [OK] Web App ^(Hosting^): %HOSTING_URL%
+if %DEPLOY_RULES%==1 echo   [OK] Firestore Rules
+echo.
+echo Live at: %HOSTING_URL%
+
+REM Tag the deploy: deploy-YYYYMMDD-HHMM (PowerShell formats the date locale-independently;
+REM %date%/%time% vary by Windows locale and contain / : and spaces).
+for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmm"') do set "STAMP=%%T"
+git tag "deploy-!STAMP!"
+if errorlevel 1 (
+    echo [WARN] Could not create tag deploy-!STAMP! ^(already exists?^)
+) else (
+    git push --tags
+    if errorlevel 1 (
+        echo [WARN] Tag created locally but push --tags failed.
+    ) else (
+        echo [OK] Tagged deploy-!STAMP!
+    )
+)
+
+goto end
+
+:error
+echo.
+echo [ERROR] Deployment failed!
+exit /b 1
+
+:end
+endlocal
+```
+
+- [ ] **Step 3: Fill the project constants**
+
+Replace `<project>` in both scripts with the real Firebase project id (same value as `wrangler.toml` and `.firebaserc`). Both files are ASCII-only on purpose (cmd.exe and UTF-8 do not mix); keep them that way.
+
+- [ ] **Step 4: Test `dev.bat --app`**
+
+Run in one terminal: `dev.bat --app`. In another: `curl.exe -s -o NUL -w "%{http_code}" http://localhost:5173/`
+Expected: `200`; the concurrently banner shows `[APP]` in blue; editing `apps/web/src/routes/index.tsx` (change the tagline) updates the browser without a reload. Stop with Ctrl+C.
+
+- [ ] **Step 5: Test `dev.bat` (all) end to end against emulators**
+
+Run `dev.bat`. Expected: three coloured streams `[EMU]` green, `[API]` magenta, `[APP]` blue; Emulator UI at http://127.0.0.1:4000; `curl.exe http://127.0.0.1:8787/health` → 200. In the app, click **Sign in with Google** → the Auth **emulator** sign-in page appears (not Google's) → choose/create a test account → **Call protected /ping** → uid + server time; the Emulator UI shows `users/<uid>` and `metrics/global` in Firestore. The Worker log shows the `AUTH EMULATOR MODE` warning once per request. Stop with Ctrl+C.
+
+- [ ] **Step 6: Test `prod.bat --build-only`**
+
+With a clean tree: `prod.bat --build-only`
+Expected: preflight passes (typecheck, lint, tests, audit), web build + bundle scan run, "Build Complete (deploy skipped)"; `apps\web\dist\index.html` exists. Then dirty the tree (`echo x>> README.md`) and run again → aborts at `[PREFLIGHT] Checking git working tree` with `[ERROR]`; `git checkout README.md`.
+
+- [ ] **Step 7: `.gitignore` check**
+
+Run: `pnpm --filter @wayfare/tools test` — Expected: the `gitignore.test.ts` cases for `.env` and `apps/api/.dev.vars` PASS. Also `git status --short` must not list `.env` or `apps/api/.dev.vars` after the dev run created them.
+
+- [ ] **Step 8: Real deploy via `prod.bat --all`** (replaces the manual Task 13 commands for future deploys)
+
+Fill the repo-root `.env` with the five secrets. Run `prod.bat --all`.
+Expected: `[SECRETS]` shows `[OK]` for all five; Worker deployed; `firebase deploy --only hosting,firestore:rules` succeeds; "Live at: https://<project>.web.app"; a `deploy-YYYYMMDD-HHMM` tag is pushed. Repeat the Task 13 Step 5 smoke.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add dev.bat prod.bat
+git commit -m "chore: dev.bat (emulators + worker + app) and prod.bat (guarded deploy with secret sync)"
+```
+
+---
+
+### Task 15: CI and CD on GitHub Actions
 
 **Files:**
 - Create: `.github/workflows/ci.yml`, `.github/workflows/deploy.yml`
@@ -3605,15 +4622,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm --filter @wayfare/domain --filter @wayfare/providers --filter @wayfare/api --filter @wayfare/web test
+      - run: pnpm --filter @wayfare/domain --filter @wayfare/providers --filter @wayfare/api --filter @wayfare/web --filter @wayfare/tools test
       - run: pnpm --filter @wayfare/firebase-rules test
+      - run: pnpm audit --audit-level high
       - run: pnpm --filter @wayfare/web build
         env:
           VITE_FIREBASE_API_KEY: ci
           VITE_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
           VITE_FIREBASE_PROJECT_ID: ci
           VITE_FIREBASE_APP_ID: ci
-          VITE_API_BASE_URL: https://ci.invalid
+          VITE_API_URL: https://ci.invalid
+      - name: Bundle secret scan (after build)
+        run: pnpm --filter @wayfare/tools exec vitest run test/bundleSecrets.test.ts
+      - name: Repo secret scan (all tracked files)
+        run: git ls-files | xargs node tools/scripts/secret-scan.mjs
 ```
 
 - [ ] **Step 2: Deploy workflow**
@@ -3654,7 +4676,7 @@ jobs:
           VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
@@ -3682,7 +4704,7 @@ Expected: **CI** green; **Deploy** green; site and Worker redeployed; repeat Tas
 
 ---
 
-### Task 15: Repository docs for Phase 0
+### Task 16: Repository docs for Phase 0
 
 **Files:**
 - Modify: `README.md` (append a "Development" section)
@@ -3742,14 +4764,155 @@ git push origin master
 
 ---
 
+### Task 17: Security review (independent) and remediation
+
+**Files:**
+- Create: `docs/superpowers/reviews/YYYY-MM-DD-phase-0-security-review.md` (dated the day the review is performed, e.g. `2026-10-05-phase-0-security-review.md`)
+- Modify: whatever the findings require, each fix accompanied by a test
+- Create/Modify: `docs/superpowers/backlog/phase-6-hardening.md` (low findings)
+
+**Interfaces:**
+- Consumes: the deployed Phase 0 stack (Task 13/14), the CI run (Task 15), spec §8.
+- Produces: a review document with findings rated **high / medium / low**, and a remediation commit per high/medium finding. **Phase 0 is not done until this task ends with zero open high/medium findings** (Global Constraints).
+
+**Who performs it:** a **fresh reviewer** — a separate subagent started with only this task, the spec and read access to the repo, or the owner personally. **Not the implementer** of Tasks 1–16. The reviewer must not consult the implementer's reasoning, only the code, the tests, the running system and the checklist below. If a subagent is used, launch it with the instruction: "You are an independent security reviewer. Do not fix anything. Read spec §8 and the Phase 0 plan's Task 17 checklist, inspect the repository and the deployed app, run the listed commands, and write the review document with evidence for every item."
+
+- [ ] **Step 1: Reviewer runs the automated evidence**
+
+```bash
+pnpm install --frozen-lockfile
+pnpm audit --audit-level high                     # dependency vulnerabilities
+pnpm test                                         # domain, providers, api (auth/admin/cors/headers/rate-limit), web, tools (gitignore, secret-scan)
+pnpm --filter @wayfare/firebase-rules test        # rules emulator suite
+pnpm scan:bundle                                  # builds web and scans dist for secrets
+git ls-files | xargs node tools/scripts/secret-scan.mjs   # tracked files
+git log --all --oneline -- '*.env' '*.dev.vars' '*service-account*' '*.pem'   # must print nothing
+```
+Record each command's result (pass/fail + notable output) in the review under "Automated evidence".
+
+- [ ] **Step 2: Reviewer walks the checklist (derived from spec §8) and records PASS / FAIL with evidence for every line**
+
+```markdown
+## Checklist — spec §8 applied to Phase 0
+
+### A. Token path (Worker)
+- [ ] A1 Only RS256 accepted; `alg: none` and HS256 tokens rejected in production mode (test: apps/api/test/auth.test.ts "alg none", "alg HS256").
+- [ ] A2 `iss` must equal https://securetoken.google.com/<projectId>; `aud` must equal <projectId> (tests present and passing).
+- [ ] A3 Expired tokens rejected; `auth_time` in the future rejected.
+- [ ] A4 `sub` must be non-empty; `email_verified` must be exactly `true`.
+- [ ] A5 JWKS fetched from Google's securetoken endpoint with caching/cooldown; no key material in the repo.
+- [ ] A6 Emulator mode is gated solely by `FIREBASE_AUTH_EMULATOR_HOST`; `wrangler.toml` has no such var; `wrangler secret list` shows no such secret; production `/ping` rejects an unsigned token (manual probe with a hand-made alg:none JWT → 401).
+- [ ] A7 Malformed/absent Authorization headers → 401 JSON, never 500.
+
+### B. Admin locks
+- [ ] B1 Admin UIDs exist only in `firestore.rules` `isAdmin()` and the `ADMIN_UIDS` Worker secret — `grep -r "admins" infra apps` shows no admins collection or client-side allowlist.
+- [ ] B2 Every `/admin/*` route (including unknown paths and all methods) returns 403 for a non-admin (test present).
+- [ ] B3 State-changing admin requests require `auth_time` ≤ 15 min old (test present); GET allowed with stale auth.
+- [ ] B4 `ADMIN_UIDS` parsing ignores whitespace/empties; empty secret grants nobody (test present).
+- [ ] B5 Owner's Google account has 2-step verification with a passkey/hardware key (owner attests; recorded in the review).
+- [ ] B6 The rules file placeholder `TEST_ADMIN_UID` cannot match a real UID (Firebase UIDs are 28-char alphanumerics; placeholder contains underscores) — confirm and note.
+
+### C. Secrets handling
+- [ ] C1 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT` appear only in: `Env` type, `.dev.vars`/`.env` (git-ignored), `*.example` (empty), `dev.bat`/`prod.bat`, tests with fake values. `git grep -n "AIza\|sk-or-v1\|tvly-\|private_key"` over tracked files returns only allow-listed test/scan files.
+- [ ] C2 Bundle scan passes; manual `grep -R "securetoken\|oauth2.googleapis" apps/web/dist` is empty.
+- [ ] C3 Service account has exactly the roles listed in Task 0 (Cloud Datastore User; Hosting Admin + Rules Admin only if the same account is used for CI) — check IAM.
+- [ ] C4 KV contains only `sa_access_token` and `exhausted:*` keys; the access token TTL ≤ 55 min.
+- [ ] C5 Pre-commit secret scan hook is installed (`.git/hooks/pre-commit` → simple-git-hooks) and blocks a staged fake key (reviewer tries it).
+- [ ] C6 `.gitignore` test passes for `.env`, `.dev.vars`, `*service-account*.json`, `*.pem`, `*.p12`, `*.key`.
+
+### D. Firestore rules
+- [ ] D1 Deny-by-default catch-all present and last.
+- [ ] D2 Anonymous denied on every collection (parameterised test present).
+- [ ] D3 Users cannot read/write other users' `users/*`, `plans/*` (test present).
+- [ ] D4 No client can write `config/*`, `llmModels/*`, `usageDaily/*`, `metrics*`, `auditLog/*`, not even the admin UID (test present).
+- [ ] D5 Rules require `email_verified == true` for any authenticated access (test present).
+- [ ] D6 Deployed rules equal the repo's `firestore.rules` (Firebase console → Rules → compare hash/last deploy time to the latest Deploy run).
+
+### E. Headers, CSP, CORS
+- [ ] E1 Worker responses (200/401/403/404/429/500) carry HSTS, X-Content-Type-Options, Referrer-Policy, X-Frame-Options, CSP `frame-ancestors 'none'`, Permissions-Policy, Cache-Control no-store (test present; verify live with `curl -I`).
+- [ ] E2 Hosting responses carry HSTS, nosniff, Referrer-Policy, Permissions-Policy, CSP with `frame-ancestors 'none'` and a `connect-src` limited to the Worker URL + Google auth endpoints (verify live with `curl -I https://<project>.web.app`).
+- [ ] E3 `index.html` served with `Cache-Control: no-cache, no-store, must-revalidate`; `/assets/*` immutable.
+- [ ] E4 CORS: foreign Origin gets no ACAO on simple and preflight requests; allowed origin succeeds (test present; verify live with `curl -H "Origin: https://evil.test" -I <worker>/health`).
+- [ ] E5 `ALLOWED_ORIGIN` in `wrangler.toml` equals the Hosting origin exactly (scheme + host, no trailing slash).
+
+### F. Error leakage and logging
+- [ ] F1 Thrown errors return `{ error: "internal", message: "Internal error" }` with no stack or message (test present).
+- [ ] F2 Worker logs contain uid/plan id/path/model only — grep the log statements for `email`, `brief`, `token`, `authorization`: none logged.
+- [ ] F3 Auth failure messages do not echo the token.
+
+### G. Dependencies and supply chain
+- [ ] G1 `pnpm audit --audit-level high` clean (or each finding has a documented override with expiry).
+- [ ] G2 Lockfile committed; CI uses `--frozen-lockfile`; `packageManager` pinned in root package.json.
+- [ ] G3 GitHub Actions use pinned major versions; secrets are not echoed in logs (check the latest Deploy run log for the SA JSON — must be masked/absent).
+- [ ] G4 Dependabot config present or scheduled for Phase 6 (record which).
+
+### H. Rate limiting (baseline)
+- [ ] H1 61st request/min from one IP → 429 with Retry-After (test present); documented as Phase 6 baseline, not a distributed guarantee.
+
+### I. Deployment hygiene
+- [ ] I1 `prod.bat` refuses a dirty working tree (reviewer verifies by dirtying the tree).
+- [ ] I2 `prod.bat` aborts on `pnpm audit --audit-level high` failure (reviewer verifies by temporarily adding a known-vulnerable dev dependency in a scratch branch, or by inspecting the script logic if no such package is at hand — record which).
+- [ ] I3 `prod.bat` runs the bundle secret scan after the web build and aborts on failure.
+- [ ] I4 Deploy tags exist for each production deploy (`git tag -l "deploy-*"`).
+
+### J. Privacy minimums for Phase 0 data
+- [ ] J1 `users/{uid}` stores no email/name (only tier, dates, flags); `metricsDaily` holds counters only.
+- [ ] J2 Account deletion is not yet implemented — recorded as an accepted Phase 3 gap (spec §13 G-L2), not a finding.
+```
+
+- [ ] **Step 3: Reviewer writes the review document**
+
+`docs/superpowers/reviews/YYYY-MM-DD-phase-0-security-review.md` structure:
+```markdown
+# Phase 0 Security Review — <date>
+Reviewer: <name / subagent id>  ·  Commit reviewed: <sha>  ·  Deployed Worker version: <wrangler deployments list id>
+
+## Automated evidence
+| Command | Result | Notes |
+|---|---|---|
+| pnpm audit --audit-level high | PASS/FAIL | … |
+| … | | |
+
+## Checklist results
+(The full checklist above with each box ticked PASS or marked FAIL + evidence link/line.)
+
+## Findings
+| ID | Severity (high/medium/low) | Item | Description | Evidence | Recommended fix |
+|---|---|---|---|---|---|
+| F-1 | high | A6 | … | … | … |
+
+## Verdict
+Open high: N · Open medium: N · Low (to Phase 6 backlog): N
+```
+Severity guide: **high** = a stranger can read/write another user's data, obtain a secret, or bypass auth/admin; **medium** = a defence from spec §8 is missing or untested but not directly exploitable today; **low** = hardening/hygiene with no current exposure.
+
+- [ ] **Step 4: Remediation (implementer, not reviewer)**
+
+For **every high and medium finding**: write a failing test that demonstrates the finding → fix → test passes → commit `fix(security): <finding id> <summary>` referencing the review file. Re-run Step 1. Ask the reviewer to re-verify the specific items and update the review's Verdict.
+For **every low finding**: append to `docs/superpowers/backlog/phase-6-hardening.md` as a checklist item with the finding id and evidence.
+
+- [ ] **Step 5: Close-out**
+
+Phase 0 is marked done only when the review's Verdict reads `Open high: 0 · Open medium: 0`. Commit:
+```bash
+git add docs/superpowers/reviews docs/superpowers/backlog
+git commit -m "docs(security): Phase 0 independent security review and remediation record"
+git push origin master
+```
+
+---
+
 ## Self-Review
 
+**Task map:** 0 accounts · 1 scaffold + gitignore tests + pre-commit secret scan · 2 domain basics · 3 model registry · 4 LLM adapters · 5 ModelRouter · 6 Worker scaffold (CORS, headers, error hygiene, rate-limit baseline) · 7 token verification (+ emulator mode) · 8 admin guard · 9 Firestore client + `/ping` (+ emulator host) · 10 quota store + admin LLM ping · 11 rules + emulator tests · 12 web app (+ emulator wiring, bundle scan) · 13 first deploy · **14 `dev.bat` / `prod.bat`** · 15 CI/CD · 16 docs · **17 independent security review + remediation**.
+
 **Spec coverage (Phase 0 contents, spec §11):**
-- Monorepo → Task 1. Firebase Spark project → Task 0. Worker with token verification → Tasks 6–7. Rules + emulator tests → Task 11. CI → Task 14. Model registry + chain router + quota tracking → Tasks 3, 5, 10 (Firestore counters, KV flags — per the KV write ceiling in Global Constraints). Admin UID locks → Tasks 8, 11, 13. Locale registry → Tasks 2, 12. "Done when: signed-in user calls protected `/ping`; admin lock tests pass" → Task 13 Step 5 plus the tests in Tasks 8 and 11.
+- Monorepo → Task 1. Firebase Spark project → Task 0. Worker with token verification → Tasks 6–7. Rules + emulator tests → Task 11. CI → Task 15. Model registry + chain router + quota tracking → Tasks 3, 5, 10 (Firestore counters, KV flags — per the KV write ceiling in Global Constraints). Admin UID locks → Tasks 8, 11, 13. Locale registry → Tasks 2, 12. "Done when: signed-in user calls protected `/ping`; admin lock tests pass" → Task 13 Step 5 / Task 14 Step 5 plus the tests in Tasks 8 and 11; **and** Task 17's Verdict shows no open high/medium findings (Global Constraints).
 - §7.1 KPI counters begin here (`metrics/global`, `metricsDaily`) → Task 9; the dashboard UI is a later phase.
-- §8 items in Phase 0 scope: token rules, admin locks, CORS lock, security headers, secrets only in the Worker, deny-by-default rules. App Check, rate limits and the audit log are Phase 6 by spec.
+- §8 items in Phase 0 scope, each with an automated test: token rules (Task 7: expired, wrong iss, wrong aud, alg none, HS256, missing/empty sub, `email_verified` false/absent, future `auth_time`, malformed headers, emulator gating), admin locks (Task 8: 403 on every `/admin/*`, 15-min freshness on non-GET, `ADMIN_UIDS` parsing), CORS lock and security headers on every response incl. errors, no stack-trace leakage (Task 6), rate-limit baseline (Task 6), secrets only in the Worker (Task 1 gitignore tests + pre-commit scan; Task 12 bundle scan; Task 15 CI scans), deny-by-default rules with anonymous/other-user/admin-write sweeps (Task 11). App Check, distributed rate limits and the audit log remain Phase 6 by spec; the in-memory limiter is explicitly a baseline.
 - §2.5 i18n registry with `dir` from the row → Tasks 2, 12.
+- Local development and deployment ergonomics (owner request): Task 14, with emulator support threaded through Tasks 7, 9, 11, 12 and the `index.html` no-cache header in Task 11.
 
-**Placeholder scan:** The only placeholders are values the executor obtains from their own accounts — `<project>`, `<kv-id>`, `<subdomain>`/`<cf-subdomain>`, `<your-uid>`, the generated `TEST_PEM` — and each has an explicit instruction for where the value comes from. No "TBD"/"TODO".
+**Placeholder scan:** The only placeholders are values the executor obtains from their own accounts — `<project>`, `<kv-id>`, `<subdomain>`/`<cf-subdomain>`, `<your-uid>`, the generated `TEST_PEM`, and the review file's `YYYY-MM-DD` date — and each has an explicit instruction for where the value comes from. No "TBD"/"TODO".
 
-**Type consistency:** `QuotaStore.recordCall(entry: ModelEntry, outcome, now)` is identical in Tasks 5 and 10. `AppEnv`/`AppVariables.deps` (`fetchImpl`, `now`, `jwks?`) are consumed the same way in Tasks 6–10. `firestoreFor(env, fetchImpl, now)` defined in Task 9 is imported in Task 10. `PingResponse`/`AdminPingResponse`/`LlmPingResponse` (Task 2) match the JSON produced in Tasks 7–10 and parsed in Task 12. `providerDayKey` (Task 5) is used by `FirestoreQuotaStore` (Task 10). `fakeFirestore`, `TEST_PEM`/`TEST_SA_JSON` and `makeTestJwks` are shared helpers introduced in Tasks 7 and 9 and reused in Tasks 9–10. The `AuthUser` stub in Task 6 is replaced by the real type in Task 7 with the same `uid` field.
+**Type and name consistency:** `QuotaStore.recordCall(entry: ModelEntry, outcome, now)` is identical in Tasks 5 and 10. `AppEnv`/`AppVariables.deps` (`fetchImpl`, `now`, `jwks?`) are consumed the same way in Tasks 6–10. `firestoreFor(env, fetchImpl, now)` defined in Task 9 is imported in Task 10. `PingResponse`/`AdminPingResponse`/`LlmPingResponse` (Task 2) match the JSON produced in Tasks 7–10 and parsed in Task 12. `providerDayKey` (Task 5) is used by `FirestoreQuotaStore` (Task 10). `fakeFirestore`, `TEST_PEM`/`TEST_SA_JSON` and `makeTestJwks` are shared helpers introduced in Tasks 7 and 9 and reused in Tasks 9–10. The `AuthUser` stub in Task 6 is replaced by the real type in Task 7 with the same `uid` field. `verifyIdToken(token, projectId, getKey, now, { emulator })` (Task 7) is the only signature used by the middleware. `FirestoreClientOptions.host` (Task 9) is the only knob `firestoreFor` uses for the emulator. Environment variable names are identical everywhere they appear — `Env` (Task 6), `.dev.vars.example` (Task 6), `.env.example` (Task 1), `vitest` bindings (Task 6), `wrangler secret put` (Task 13), `dev.bat`/`prod.bat` (Task 14), CI (Task 15): `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT`, `FIREBASE_AUTH_EMULATOR_HOST`, `FIRESTORE_EMULATOR_HOST`; web: `VITE_API_URL`, `VITE_USE_EMULATORS`, `VITE_FIREBASE_*`.
