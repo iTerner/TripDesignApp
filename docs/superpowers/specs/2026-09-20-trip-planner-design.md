@@ -11,7 +11,7 @@
 
 A web app that turns a short, structured trip brief (destination, dates and flights, party, mobility, pace, budget, vacation-type mix, interests, must-visits, free-text) into a day-by-day itinerary with a map: ordered stops, travel legs, approximate time per stop, where to sleep each night, links, and exports (PDF, Google Docs, share link). Planning is performed by free-tier LLMs over a **verified menu of real places** built offline, so the model chooses rather than invents. Everything runs at **zero cost with no payment card anywhere**.
 
-Business model: sign-in with Google is mandatory to plan; the first plan is free forever (one per account); editing, regenerating and additional plans require a monthly **Plus** subscription (metered).
+Business model: sign-in with Google is mandatory to plan; the first plan is free forever (one per account); editing, regenerating and additional plans require the **Plus** tier (metered). **In v1 Plus is granted manually by the admin — no payments are collected; payments (Stripe) arrive in Phase 7.**
 
 ### Hard constraints (non-negotiable)
 
@@ -107,6 +107,8 @@ Vacation types (Foodie, Wine & vineyards, Culture & museums, History & landmarks
 
 All numbers are admin-tunable (§7). A higher "Pro" tier is roadmap only.
 
+During v1, Plus is granted/revoked only from the admin Users panel (`tierSource: admin`). No payment is collected.
+
 ---
 
 ## 2. System architecture
@@ -119,7 +121,7 @@ Browser (React + TS, Firebase Hosting)
 Cloudflare Worker (free) — the only holder of secrets
   ├─ verify Firebase ID token (JWKS), App Check, rate limits
   ├─ quota transactions, tier checks, admin guards
-  └─ proxies: LLM, search, geocode, routing; Stripe webhook
+  └─ proxies: LLM, search, geocode, routing
 GitHub Actions (free cron) — scouting job, eval suite
 Firestore (Spark) — all data (see §6)
 External free APIs — Gemini (AI Studio key), OpenRouter :free, Tavily,
@@ -129,10 +131,10 @@ External free APIs — Gemini (AI Studio key), OpenRouter :free, Tavily,
 ### 2.1 Responsibilities
 
 - **Browser** does everything that needs no secrets, including the deterministic **scheduler** (day layout). It also orchestrates plan generation step by step (each step = one short Worker call), persisting progress after every step so generation is resumable and streams progress.
-- **Cloudflare Worker** is a thin stateless API: token verification (`iss`, `aud`, `exp`, signature, `email_verified`), App Check, per-IP/UID rate limits, quota transactions in Firestore, provider calls with secrets, Stripe webhook. Free plan: 100k req/day, ~10 ms CPU/request (network wait not counted). Writes to Firestore via REST with a least-privilege service account.
+- **Cloudflare Worker** is a thin stateless API: token verification (`iss`, `aud`, `exp`, signature, `email_verified`), App Check, per-IP/UID rate limits, quota transactions in Firestore, provider calls with secrets. Free plan: 100k req/day, ~10 ms CPU/request (network wait not counted). Writes to Firestore via REST with a least-privilege service account.
 - **GitHub Actions** runs the batch **scouting job** (schedule + `repository_dispatch` from the Worker) and the monthly **model eval suite**. Never in the user's critical path.
 - **Firebase**: Auth (Google provider only, email enumeration protection, authorized domains restricted), Firestore, Hosting (headers: CSP, HSTS, `frame-ancestors 'none'`).
-- **Stripe**: Checkout + webhook → `subscriptions`, `users.tier`. Test mode in v1.
+- **Payments: not in v1.** A `PaymentProvider` interface exists with a single `NotImplementedPaymentProvider`; no Stripe SDK, keys, webhook or Checkout. Tier changes come only from the admin panel.
 
 ### 2.2 Providers behind interfaces
 
@@ -314,7 +316,7 @@ See the canvas for interactive wireframes. Summary:
 | 3 | **Generating** | Human-readable steps with model/provider per step; live refinement log with reasons; resumable. |
 | 4 | **Plan view** | Day tabs; map with numbered pins, route line, other days muted; timeline with time · name · **one approximate total** · category · badges · travel legs · website; "Tonight's base" card with rationale, one suggested stay, Booking/Airbnb links; "Getting around" strip per day and "Car rental plan" card (§3.8); "Your notes" panel showing honoured / partial / not honoured; **"© OpenStreetMap contributors" attribution on the map corner** (§12); version dropdown; "How this plan was refined"; "Suggestions you can apply" (Plus); Export PDF / Docs / Share; Edit (gated). Place card on pin click: what, why, evidence, hours, booking note, website. |
 | 5 | **Can't fit** | Each violated constraint with the exact reason and options; free generation not consumed. |
-| 6 | **Upgrade** | Free vs Plus; shown on Edit / Regenerate / New plan for Free users. |
+| 6 | **Upgrade** | Free vs Plus comparison; button reads "Coming soon — request access"; submitting sets `users.plusRequested = true` (visible in admin Users). No price shown. Shown on Edit / Regenerate / New plan for Free users. |
 | 7 | **My plans** | Status, versions (opens **Version history**: when, origin, what changed; View / Compare / Restore), shared state, monthly usage; queued plans show resume time. |
 | 8 | **Admin** | §7. |
 | — | Share page `/p/{id}` | Read-only plan view, no personal data, `noindex`, "Plan your own" via the gate. |
@@ -328,7 +330,7 @@ Design principles: one accent colour; calm spacing; limits visible but not naggi
 
 | Collection | Key | Holds | Written by |
 |---|---|---|---|
-| `users/{uid}` | UID | profile, locale, `tier`, `tierSource: none|stripe|admin`, `freeGenerationUsed`, timestamps | Worker |
+| `users/{uid}` | UID | profile, locale, `tier`, `tierSource: none|stripe|admin`, `freeGenerationUsed`, `plusRequested: boolean`, `plusRequestedAt`, timestamps | Worker |
 | `users/{uid}/usage/{yyyy-mm}` | month | `plansCreated`, `regenerations`, `surgicalEdits` | Worker (transaction) |
 | `plans/{planId}` | random | `ownerUid`, destination + scope, `status: drafting|generating|queued|ready|failed`, `currentVersionId`, `brief`, `generation` (step, model per step, refinement log, gate result) | Worker; client may write `brief` while `drafting` |
 | `plans/{planId}/versions/{vId}` | ordinal | immutable itinerary (days → stops with placeId, times, approx total + breakdown, travel leg, why, tips, badges; bases; metrics; narrative per language), `origin: original|regenerate|edit|restore|apply-suggestion`, `restoredFrom`, summary | Worker |
@@ -345,9 +347,9 @@ Design principles: one accent colour; calm spacing; limits visible but not naggi
 | `llmModels/{id}` | model id | registry entry | Worker (admin), eval job |
 | `usageDaily/{provider}_{date}` | — | provider request counters | Worker |
 | `metrics/global` | — | `totalUsers`, `totalPlans`, `activeSubscriptions` (running counters) | Worker |
-| `metricsDaily/{date}` | yyyy-mm-dd | `signIns`, `newUsers`, `activeUsers`, `plansGenerated`, `plansQueued`, `gateFailures`, `edits`, `exports`, `upgrades`, `cancellations`, `generationMsSum/Count`, per-destination plan counts (§7.1) | Worker (increments) |
+| `metricsDaily/{date}` | yyyy-mm-dd | `signIns`, `newUsers`, `activeUsers`, `plansGenerated`, `plansQueued`, `gateFailures`, `edits`, `exports`, `upgrades`, `cancellations` (admin grants/revocations in v1), `plusRequests`, `generationMsSum/Count`, per-destination plan counts (§7.1) | Worker (increments) |
 | `auditLog/*` | random | admin actions, tier changes, daily summary | Worker |
-| `subscriptions/{uid}` | uid | Stripe ids, status, period end | Worker (webhook) |
+| `subscriptions/{uid}` | uid | **reserved for Phase 7 (payments); not created in v1** — Stripe ids, status, period end | Worker (webhook, Phase 7) |
 | `scoutRuns/*` | random | logs, counts, errors | Scout |
 
 **Versions are immutable and never deleted.** Restore copies the chosen version to a new one (`origin: restore`); costs nothing; not metered. Share links point at a version.
@@ -390,8 +392,8 @@ A small, deliberately short set of metrics — read from two documents (`metrics
 | Plans generated today · 7 days | completed generations | `metricsDaily.plansGenerated` |
 | Median generation time | `generationMsSum / generationMsCount` (mean shown; p50 from a small bucket histogram) | `metricsDaily` |
 | Gate failure rate | `gateFailures / (plansGenerated + gateFailures)` | `metricsDaily` |
-| Active Plus subscriptions · upgrades today · cancellations today | | `metrics/global.activeSubscriptions`, `metricsDaily.upgrades/cancellations` (Stripe webhook) |
-| Free → Plus conversion | active subscriptions ÷ users who used their free plan | derived |
+| Active Plus (manual grants) · grants today · revocations today | v1: admin grants/revocations; Phase 7: subscriptions | `metrics/global.activeSubscriptions`, `metricsDaily.upgrades/cancellations` |
+| Requested Plus | during v1: share of free-plan users who requested Plus (`plusRequested`); Phase 7: Free → Plus conversion | derived |
 | Top destinations (7 days) | plan counts per destination | `metricsDaily.byDestination` map |
 | Quota health | best-chain requests remaining today; queued plans | `usageDaily`, `plans` where `status = queued` |
 
@@ -403,11 +405,11 @@ Sparklines for the last 30 days on users, plans and DAU. No third-party analytic
 | Magic numbers | pace caps, effort factors, day-window defaults, rest blocks, queue buffers, shortlist size, refinement iterations per tier, Fast Pack size, day-trip radius, energy constants — save as config version, revert |
 | Tiers & limits | §1.4 table editable; Plus price placeholder; add tier |
 | Model registry | reorder chains, enable/disable, live per-model usage vs observed limit, override limits, "scouting uses Best chain", eval scores |
-| Users | search; tier override with reason (`tierSource: admin`, Stripe cannot undo); reset free generation; disable |
+| Users | search; **"Plus requests" filter with one-click grant**; tier override with reason (`tierSource: admin`; a future payment webhook cannot undo it); reset free generation; disable. In v1 this panel is the only way Plus is granted |
 | Plans | recent plans, status, model per step, iterations, gate failures with the violated constraint; read-only open |
 | Scouting | destination statuses, counts (scouted vs user-found places), asks served from cache vs searched, top unmet asks, flagged places awaiting re-verification, "Scout now" / "Refresh trends", last run log |
 | Quota & health | per-provider daily usage vs caps (Gemini, OpenRouter, search, ORS, Nominatim, Firestore, Worker), queued plans, error rate, median generation time |
-| Feature flags | payments live/test, Docs export, Fast Pack, new-destination scouting, maintenance banner |
+| Feature flags | payments: disabled (Phase 7), Docs export, Fast Pack, new-destination scouting, maintenance banner |
 | Custom entries | anonymous aggregate of user-typed categories for promotion to built-ins |
 
 All admin writes go through the Worker (validated, audited). Config hot-reloads within 60 s (KV cache).
@@ -430,7 +432,7 @@ All admin writes go through the Worker (validated, audited). Config hot-reloads 
 | SSRF | fetch only http(s) URLs from the search provider; refuse private/loopback ranges; 2 MB / time limits; HTML/text only |
 | Input validation | shared `zod` schemas; bounded lengths/enums/dates/coordinates |
 | Share links | snapshot copy, 128-bit random id, no PII, revocable, `noindex` |
-| Stripe | signature verification, idempotency, audited tier changes, test mode until flag flipped |
+| Payments | none in v1; when added (Phase 7): webhook signature verification, idempotency, audited tier changes |
 | Web | strict CSP, HSTS, `frame-ancestors 'none'`, CORS locked to app origin, no `eval` |
 | Supply chain | Dependabot, `pnpm audit`, pinned lockfile, scoped Actions secrets; scout job has no Auth access |
 | Privacy | logs carry UIDs/plan IDs only; audit log for admin actions; account + plans deletion; policy discloses free-tier prompts may be used by Google to improve models |
@@ -465,7 +467,7 @@ All admin writes go through the Worker (validated, audited). Config hot-reloads 
 - Providers: contract tests on recorded fixtures; nightly live smoke on a tiny quota slice.
 - **Golden-brief eval suite**: ~20 fixed briefs (foodie couple Tuscany 6n; family with toddlers Rome 4n; solo photographer Kyoto; kosher family Lisbon; …) → lint score + rubric score per model, monthly, into `llmModels`; runs on prompt changes in CI with a small quota slice.
 - Firestore rules: emulator tests, every collection × {anonymous, owner, other, admin}.
-- Worker: integration tests with Firebase emulator (auth, quota transactions, admin guards, Stripe signatures).
+- Worker: integration tests with Firebase emulator (auth, quota transactions, admin guards, Plus request/grant flow; payment webhook signatures in Phase 7).
 - Web: component tests (brief limits, custom entries, readback, day hours); Playwright flows (globe → gate → brief → generating → plan → export); RTL snapshots.
 
 ---
@@ -478,9 +480,10 @@ All admin writes go through the Worker (validated, audited). Config hot-reloads 
 | 1 · Menu for one region | Tuscany pack | scout stages 1–7; `places/packs/stayAreas`; admin Scouting panel | 1,000+ verified places with scores and evidence |
 | 2 · Plan engine | real Tuscany plan | Trip Brief (all steps); pipeline 1–11; scheduler; critic loop; gate; refinement log; Generating screen | golden briefs pass lint; a friend gets a half-decent plan |
 | 3 · Plan view & map | looks like a product | globe home + search (cities/regions/countries) + auth gate; MapLibre plan map; timeline; place cards; bases; getting-around strip + car rental card; notes status; share link; PDF; EN + HE; **legal gates G-L1, G-L2** (attribution, AI label, privacy notice, licences page, deletion) | you'd send the link to someone |
-| 4 · Tiers & quotas | Free/Plus enforced | quota transactions; Upgrade screen; Stripe test mode + webhook; cancel-in-one-click; admin Users; Fast Pack; **legal gate G-L4 before live payments** | second Free plan blocked server-side; admin flips tiers |
+| 4 · Tiers & quotas (admin-granted Plus) | Free/Plus enforced without payments | quota transactions; Upgrade screen with "request access"; `plusRequested` flow; admin Users panel with Plus-requests filter and one-click grant/revoke; Fast Pack | second Free plan blocked server-side; admin grants/revokes Plus; Plus request flow works |
 | 5 · Plus editing | edits reuse the engine | surgical edits; regenerate with versions; version history + restore + compare; apply suggestions; Google Docs export (**G-L3** OAuth verification) | edit without full regeneration |
-| 6 · Hardening | ready for strangers | App Check; rate limits; CSP; audit log; scheduled eval suite; more destinations seeded; takedown route; THIRD-PARTY-NOTICES; accessibility statement; **legal gate G-L5** counsel sign-off | §8 checklist and §13 gates green |
+| 6 · Hardening | ready for strangers | App Check; rate limits; CSP; audit log; scheduled eval suite; more destinations seeded; takedown route; THIRD-PARTY-NOTICES; accessibility statement; **legal gate G-L5** counsel sign-off (no payment dependency) | §8 checklist and §13 gates (except G-L4) green |
+| 7 · Payments | charge for Plus | Stripe Checkout + webhook; `subscriptions`; cancel-in-one-click; refund policy; VAT/invoices; renewal reminders; **legal gate G-L4**; price decision | a stranger can subscribe and cancel; counsel sign-off on commerce terms |
 
 Each phase gets its own implementation plan (writing-plans). Nothing in a later phase blocks an earlier one.
 
@@ -564,7 +567,9 @@ Hebrew and English versions of all documents; the Hebrew version governs for Isr
 
 Places are businesses and public sites; listing public facts about them is lawful. Rules: never store personal names of reviewers or posters from mined pages; store only the venue-relevant quote; provide "Report or correct this place" so a venue can fix hours, ask for a quote's removal, or ask to be delisted (honoured within 7 days unless the fact is plainly public and accurate); log requests in `auditLog`.
 
-### 12.7 Payments and consumer protection (Phase 4 gate)
+### 12.7 Payments and consumer protection (Phase 7 — not applicable until payments exist)
+
+While Plus is granted manually and free of charge, the Terms state this explicitly and no refund/withdrawal terms apply.
 
 - Before checkout: total price with tax, currency, billing interval, auto-renewal statement, cancellation route, links to Terms/Privacy/Refund; button labelled "Subscribe — pay €X/month" (an unambiguous obligation-to-pay label).
 - **Cancel in one click** from Account, effective at period end, with e-mail confirmation on a durable medium; a persistent "Cancel subscription" control (EU electronic withdrawal function, in force since 19 June 2026).
@@ -585,7 +590,7 @@ There is no in-house legal team; this is the **process** that substitutes for on
 | External counsel (Israel) | To be engaged before Phase 4 | Reviews ToS, Privacy, Refund policy, Hebrew versions, consumer-law compliance, company formation, trademark clearance of the final name |
 | EU/consumer-law check | Same counsel or a specialist | Only if EU users are targeted (EU-language marketing, euro pricing, or > 10% EU sign-ups): CRD, AI Act Art. 50, GDPR representative question |
 | Security & privacy reviewer | Founder + optional external pen-test | §8 checklist before Phase 6; annual review |
-| Accountant | To be engaged before Phase 4 | Israeli VAT, invoicing, Stripe payouts |
+| Accountant | To be engaged before Phase 7 | Israeli VAT, invoicing, Stripe payouts |
 
 **Legal gates in the roadmap**
 
@@ -594,7 +599,7 @@ There is no in-house legal team; this is the **process** that substitutes for on
 | G-L1 Attribution | 3 (Plan view) | OSM/OpenFreeMap/ORS attribution visible on every map, PDF and share page; licences page live; AI-generated label on plans |
 | G-L2 Notice & privacy | 3 | Privacy notice at sign-in and first brief; Privacy Policy and AI Disclaimer published (draft, founder-reviewed); account deletion works |
 | G-L3 Google verification | 5 (Docs export) | OAuth consent screen verified with privacy policy on our domain; Limited Use statement live |
-| G-L4 Commerce | 4 (Tiers) — before flipping payments to live | Company registered; ToS, Refund policy, Hebrew versions reviewed by counsel; Stripe business verified; cancel-in-one-click implemented; VAT handled |
+| G-L4 Commerce | 7 (Payments) — before any payment is collected | Company registered; ToS, Refund policy, Hebrew versions reviewed by counsel; Stripe business verified; cancel-in-one-click implemented; VAT handled |
 | G-L5 Public launch | 6 (Hardening) | Counsel sign-off on all documents; database definition document and incident procedure complete; takedown route live; trademark cleared; THIRD-PARTY-NOTICES generated; accessibility statement published |
 | Ongoing | — | Annual document review; re-check provider terms quarterly (free tiers change); log every takedown/correction request |
 
@@ -606,7 +611,7 @@ There is no in-house legal team; this is the **process** that substitutes for on
 
 | Decision | Choice | Why |
 |---|---|---|
-| v1 success | runnable MVP for friends; monetization designed, payments in test mode | real plans for real regions, no legal/financial exposure yet |
+| v1 success | runnable MVP for friends; monetization designed, no payments in v1 | real plans for real regions, no legal/financial exposure yet |
 | Lodging scope | plan picks base area per night + one concrete stay suggestion; flights are inputs | structure of multi-city trips depends on bases |
 | Trend source | Google/web primary; TikTok signal indirectly via web mining; no scraping | TikTok has no legitimate API for this |
 | Backend hosting | Firebase Spark + Cloudflare Workers free + GitHub Actions | hard "no card" rule |
@@ -632,12 +637,13 @@ There is no in-house legal team; this is the **process** that substitutes for on
 | Car rental | modelled as a costed resource with pick-up/drop-off segments, one-way allowed | don't pay for a parked car |
 | Rights | platform © company, all rights reserved; user owns inputs and plans | owner decision |
 | Legal process | no in-house team; counsel gates before payments and public launch; documents drafted in repo | zero-cost until money changes hands |
+| Payments | deferred to Phase 7; v1 Plus granted manually by admin | ship and test the product before taking money |
 
 ## 15. Open items (not blocking phase 0)
 
 - Product name (placeholder "Wayfare") — needs trademark clearance (§13).
-- Company entity and registration (needed before payments go live).
-- Plus price.
+- Company entity and registration (needed before payments go live — Phase 7).
+- Plus price (needed only for Phase 7).
 - Firestore/Google Cloud data region (EU vs US) — decide at project creation; affects the privacy policy.
 - Nominatim exit plan (self-host vs commercial geocoder) before scale.
 - Whether to make the optional one-time $10 OpenRouter credit purchase (raises the shared free pool from 50 to 1,000/day). Default: no.

@@ -2048,14 +2048,14 @@ function UpgradeScreen() {
                 </Text>
                 <Text size="small" tone="secondary">+ Google Docs export · version history · 3 review rounds</Text>
                 <Row gap={8} style={{ marginTop: 6 }}>
-                  <Button variant="primary">Continue to checkout</Button>
-                  <Text size="small" tone="tertiary">price placeholder · Stripe test mode</Text>
+                  <Button variant="primary">Coming soon — request access</Button>
+                  <Text size="small" tone="tertiary">Plus is granted manually during the pilot · payments arrive in a later phase</Text>
                 </Row>
               </Stack>
             </CardBody>
           </Card>
         </Grid>
-        <Note>Shown when a free user clicks Edit, Regenerate, or "New plan". Tier is enforced server-side.</Note>
+        <Note>Shown when a free user clicks Edit, Regenerate, or New plan. Submitting a request sets plusRequested; the admin grants Plus from the Users panel. Tier is enforced server-side.</Note>
       </Stack>
     </Frame>
   );
@@ -2243,8 +2243,8 @@ function AdminScreen() {
           </Grid>
           <Grid columns={4} gap={10}>
             <Kpi label="Sign-ins today" value="121" delta="+18% vs 7-day avg" />
-            <Kpi label="Plus subscriptions" value="47" delta="+2 today · 0 cancelled" />
-            <Kpi label="Free → Plus conversion" value="8.1%" delta="of users who used their free plan" />
+            <Kpi label="Plus (manual grants)" value="47" delta="+2 granted today · 3 requests pending" />
+            <Kpi label="Requested Plus" value="12.4%" delta="of users who used their free plan" />
             <Kpi label="Median generation" value="1.9 min" delta="p90 3.4 min" />
           </Grid>
           <Grid columns="1fr 1fr" gap={12} align="start">
@@ -2346,16 +2346,21 @@ function AdminScreen() {
       )}
       {tab === 3 && (
         <Stack gap={10}>
+          <Row gap={6}>
+            <Pill size="sm" active>Plus requests (3)</Pill>
+            <Pill size="sm">All users</Pill>
+            <Pill size="sm">Plus</Pill>
+          </Row>
           <TextInput placeholder="Search by email or uid…" type="search" />
           <Table
-            headers={["User", "Tier", "Source", "Plans", "Free gen used", "Override", ""]}
+            headers={["User", "Tier", "Source", "Plans", "Free gen used", "Requested Plus", "Override", ""]}
             rows={[
-              ["dana@…", "Plus", "stripe", "4", "yes", <Select value="plus" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="ghost">Save</Button>],
-              ["omer@…", "Free", "—", "1", "yes", <Select value="free" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="ghost">Reset free gen</Button>],
-              ["noa@…", "Plus", "admin", "2", "yes", <Select value="plus" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="ghost">Save</Button>],
+              ["dana@…", "Free", "—", "1", "yes", "yes · 2 days ago", <Select value="free" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="primary">Grant Plus</Button>],
+              ["omer@…", "Free", "—", "1", "yes", "—", <Select value="free" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="ghost">Reset free gen</Button>],
+              ["noa@…", "Plus", "admin", "2", "yes", "—", <Select value="plus" options={[{ value: "free", label: "Free" }, { value: "plus", label: "Plus" }]} />, <Button variant="ghost">Save</Button>],
             ]}
           />
-          <Note>Overrides require a reason and are written as tierSource=admin so Stripe webhooks don't undo them. Every action lands in the audit log.</Note>
+          <Note>Overrides require a reason and are written as tierSource=admin. Payments are not implemented in v1 — this panel is the only way Plus is granted. Every action lands in the audit log.</Note>
         </Stack>
       )}
       {tab === 4 && (

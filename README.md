@@ -50,13 +50,13 @@ All limits are admin-tunable. A higher "Pro" tier is roadmap only.
 |---|---|
 | Web app | React + TypeScript on Firebase Hosting |
 | Auth and data | Firebase Auth (Google provider only) + Firestore (Spark plan) |
-| API | Cloudflare Workers free plan: the only holder of secrets; token verification, App Check, rate limits, quota transactions, provider proxies, Stripe webhook |
+| API | Cloudflare Workers free plan: the only holder of secrets; token verification, App Check, rate limits, quota transactions, provider proxies |
 | Batch jobs | GitHub Actions (free cron): scouting job and monthly model eval suite |
 | LLMs | Gemini AI Studio free tier + OpenRouter `:free` models, routed through a versioned model registry with fallback chains and per-model daily quota tracking |
 | Web search | Gemini 2.5 Flash-Lite with Google Search grounding (retriever only) → Tavily fallback |
 | Maps and places | MapLibre GL + OpenFreeMap tiles; OpenStreetMap/Overpass + Wikidata for POIs; Nominatim → Photon for geocoding; OpenRouteService for routing (OSRM demo / straight-line estimate fallback) |
 | Exports | pdf-lib (in browser), Google Docs API (Plus), share-link snapshots |
-| Payments | Stripe Checkout + webhook, test mode in v1 |
+| Payments | Not in v1 (Plus granted manually by admin); Stripe planned for Phase 7 |
 | Monorepo | pnpm workspaces, TypeScript everywhere |
 
 Why no Google Maps Platform: it requires a payment card, which violates the first hard constraint. The map stack is fully open data. Google Places could later be added as a `PoiProvider` implementation behind the existing interface if a card is ever added; nothing else would change.
@@ -104,7 +104,7 @@ Planned pnpm monorepo shape, from [spec §2.4](docs/superpowers/specs/2026-09-20
 
 ```
 apps/web            React + TS web app (globe, brief, plan view, exports)
-apps/api            Cloudflare Worker (auth, quotas, provider proxies, Stripe webhook)
+apps/api            Cloudflare Worker (auth, quotas, provider proxies; payment webhook in Phase 7)
 apps/scout          batch scouting job (GitHub Actions)
 packages/domain     types, taxonomy, scheduler, lint, validation schemas, prompts, i18n registry
 packages/providers  LlmProvider, SearchProvider, GeocodeProvider, PoiProvider, RoutingProvider, TileProvider
@@ -138,9 +138,10 @@ From [spec §11](docs/superpowers/specs/2026-09-20-trip-planner-design.md#11-pha
 | 1 · Menu for one region | Tuscany destination pack | 1,000+ verified places with scores and evidence |
 | 2 · Plan engine | a real Tuscany plan | golden briefs pass lint; a friend gets a half-decent plan |
 | 3 · Plan view & map | looks like a product | you'd send the link to someone |
-| 4 · Tiers & quotas | Free/Plus enforced | second Free plan blocked server-side; admin flips tiers |
+| 4 · Tiers & quotas (admin-granted Plus) | Free/Plus enforced without payments | second Free plan blocked server-side; admin grants/revokes Plus; Plus request flow works |
 | 5 · Plus editing | edits reuse the engine | edit without full regeneration |
 | 6 · Hardening | ready for strangers | spec §8 security checklist green |
+| 7 · Payments | charge for Plus (Stripe) | a stranger can subscribe and cancel; counsel sign-off on commerce terms |
 
 ## Security highlights
 
