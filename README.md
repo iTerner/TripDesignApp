@@ -140,7 +140,7 @@ From [spec §11](docs/superpowers/specs/2026-09-20-trip-planner-design.md#11-pha
 | 3 · Plan view & map | looks like a product | you'd send the link to someone |
 | 4 · Tiers & quotas (admin-granted Plus) | Free/Plus enforced without payments | second Free plan blocked server-side; admin grants/revokes Plus; Plus request flow works |
 | 5 · Plus editing | edits reuse the engine | edit without full regeneration |
-| 6 · Hardening | ready for strangers | spec §8 security checklist green |
+| 6 · Hardening | ready for strangers | spec §8 security checklist and §13 legal gates (except G-L4) green |
 | 7 · Payments | charge for Plus (Stripe) | a stranger can subscribe and cancel; counsel sign-off on commerce terms |
 
 ## Security highlights
@@ -157,10 +157,13 @@ From [spec §8](docs/superpowers/specs/2026-09-20-trip-planner-design.md#8-secur
 
 ## Open items
 
-From [spec §13](docs/superpowers/specs/2026-09-20-trip-planner-design.md#13-open-items-not-blocking-phase-0). None block Phase 0.
+From [spec §15](docs/superpowers/specs/2026-09-20-trip-planner-design.md#15-open-items-not-blocking-phase-0). None block Phase 0.
 
-- Product name (placeholder "Wayfare").
-- Plus price.
+- Product name (placeholder "Wayfare"); needs trademark clearance.
+- Company entity and registration (needed before payments go live in Phase 7).
+- Plus price (needed only for Phase 7).
+- Firestore/Google Cloud data region (EU vs US); decide at project creation; affects the privacy policy.
+- Nominatim exit plan (self-host vs commercial geocoder) before scale.
 - Whether to make the optional one-time $10 OpenRouter credit purchase (raises the shared free pool from 50 to 1,000 requests/day). Default: no.
 - Exact set of ~30 seeded destinations.
 - Compare-versions UI detail (Phase 5).
@@ -177,5 +180,7 @@ From [spec §13](docs/superpowers/specs/2026-09-20-trip-planner-design.md#13-ope
   - [§6 Data model](docs/superpowers/specs/2026-09-20-trip-planner-design.md#6-data-model-firestore)
   - [§8 Security](docs/superpowers/specs/2026-09-20-trip-planner-design.md#8-security)
   - [§11 Phased roadmap](docs/superpowers/specs/2026-09-20-trip-planner-design.md#11-phased-roadmap)
-  - [§13 Open items](docs/superpowers/specs/2026-09-20-trip-planner-design.md#13-open-items-not-blocking-phase-0)
+  - [§12 Legal, rights and compliance](docs/superpowers/specs/2026-09-20-trip-planner-design.md#12-legal-rights--compliance)
+  - [§13 Legal team and governance](docs/superpowers/specs/2026-09-20-trip-planner-design.md#13-legal-team--governance)
+  - [§15 Open items](docs/superpowers/specs/2026-09-20-trip-planner-design.md#15-open-items-not-blocking-phase-0)
 - [Screen mockups (Cursor Canvas)](docs/superpowers/mockups/trip-planner-screens.canvas.tsx)
