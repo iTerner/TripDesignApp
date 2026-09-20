@@ -55,6 +55,7 @@ Search resolution: destination registry (curated, multilingual names) → Nomina
 | In your words | three guided prompts: *This trip must have…* · *Please avoid…* · *A perfect day looks like…* | Replaces a blank textarea; one shared character budget |
 | Must-visits | places that must appear; matched to menu or web-verified | |
 | Avoid (Plus) | places already seen / unwanted | |
+| **Notes for the planner** | a list of short free-form notes, each ≤ 240 chars (Free 2 notes, Plus 10) | Anything that doesn't fit a field. Example: *"We'll rent a car, but optimise it — don't leave it parked a whole day; picking up in one place and returning in another is fine."* See §3.8 |
 
 **Every category group is open-ended.** Each has an "Add your own" entry producing a first-class value visually marked *custom*. Custom entries count toward the same free-tier limits as built-ins. Validation: 2–40 chars, sanitised, treated as untrusted data in prompts. Custom entries are aggregated anonymously in the admin dashboard so frequent ones can be promoted to built-ins.
 
@@ -97,6 +98,7 @@ Vacation types (Foodie, Wine & vineyards, Culture & museums, History & landmarks
 | Interest tags | 3 | unlimited |
 | Must-visits | 3 | unlimited |
 | Guided brief | 300 chars total | 1,500 chars |
+| Notes for the planner | 2 notes × 240 chars | 10 notes × 240 chars |
 | Avoid list, day-window presets, per-date override presets, custom events | — | ✓ |
 | Editing individual day hours in the brief | ✓ | ✓ |
 | Exports | PDF, share link | + Google Docs |
@@ -229,6 +231,29 @@ Facts that shaped this (verified 2026-09-20): Gemini 3.1 Pro Preview has **no fr
 
 Move/remove/reorder → scheduler only (0 calls). Replace-similar → one selection call over the shortlist. Change base area → re-skeleton that segment. Change inputs → full pipeline as a new version. Restore/apply-suggestion → data copy / scheduler only.
 
+### 3.8 Notes for the planner & logistics optimisation
+
+**Notes** are the escape hatch for everything the form cannot express. In step 2 the model classifies each note into one of four kinds and the rest of the pipeline treats them accordingly:
+
+| Kind | Example | Handling |
+|---|---|---|
+| `hard_constraint` | "No driving after dark", "Shabbat: no travel Friday evening to Saturday evening" | Enforced by the scheduler; checked by the compliance gate; violation blocks the plan |
+| `preference` | "We prefer small towns over cities" | Feeds selection weights; critic checks alignment |
+| `optimisation_goal` | "Optimise the car rental — don't leave it parked all day" | Passed to the relevant optimiser (below); result explained in the plan |
+| `information` | "We've been to Florence before" | Context for selection; may add to Avoid |
+
+Every note appears in the readback ("Notes: …") and the plan shows, per note, whether it was **honoured**, **partially honoured** (with a Suggestion) or **could not be honoured** (with the reason). Notes are untrusted text (§8) and count toward the tier limits above.
+
+**Car-rental optimisation** (the canonical `optimisation_goal`, and a scheduler feature in its own right). Given `carRentalOk`, the scheduler treats the car as a **resource with a daily cost** rather than an all-or-nothing choice:
+
+- Each day gets a **mobility mode**: `car`, `on_foot_transit`, or `mixed`. Dense historic centres (ZTL zones, expensive parking — flagged per area in the destination pack) default to `on_foot_transit`; inter-area moves and rural stops require `car` or a verified transit route.
+- The optimiser chooses **rental segments** `{pickup: {place, day, time}, dropoff: {place, day, time}, oneWay}` to **minimise idle car-days** (days the car is not used for an inter-area move or a rural stop) subject to the itinerary. One-way rentals are allowed by default (with a `oneWayFeeFlag` so the narrative says "one-way return usually carries a fee — check when booking"); the user can forbid them in a note.
+- Typical output for Tuscany: *"No car for your three Florence days (ZTL; parking ≈ €30/day). Pick up at Florence Peretola on the morning of day 4 when you leave for Chianti; return at Pisa airport on your departure day (one-way)."*
+- Shown in the plan as a **"Getting around" strip per day** (car / on foot / train) and a **"Car rental plan" card** with pick-up/drop-off suggestions, rationale, estimated rental days saved, and a rental-comparison deep link (no booking). The compliance gate verifies every `car` day actually falls inside a rental segment and no rural stop is scheduled on a car-less day.
+- Magic numbers (admin-tunable): default daily rental cost per region, parking cost per area, one-way penalty, "idle day" definition.
+
+The same resource model extends later to rail passes and city transit cards ("is a 3-day Firenze Card worth it?").
+
 ---
 
 ## 4. Scouting: building the menu (offline) and Fast Pack (online)
@@ -270,9 +295,9 @@ See the canvas for interactive wireframes. Summary:
 |---|---|---|
 | 1 | **Home / Globe** | Interactive globe (drag/scroll to spin, idle rotation); search for city/region/country in any UI language with kind badges; flies to the destination then opens "Plan a trip to X?" with scope chips. Browsing needs no sign-in. |
 | — | **Auth gate** | Every entry into planning passes `requireAuth(then)`: parks the intended destination, runs Google sign-in (popup desktop / redirect mobile), resumes. The redirect is UX; the Worker's token check is the security. |
-| 2 | **Trip Brief** | 6 steps: Dates & flights → Who & how (party, getting around + car consent, budget level + optional total, diet, stay) → Pace (cards with plain meaning, default window, rest block, "let the planner set my hours") → **What you love** (centered single column: descriptive vacation-type cards with mostly/also order, type-anything interests + destination suggestions, three guided prompts, live readback) → Must-visits (matched: Menu / Web-verified) → Review (every dimension with Edit links; day-by-day editable hours or planner-chosen). Free limits shown as small meters on the field; unavailable options fade. |
+| 2 | **Trip Brief** | 6 steps: Dates & flights → Who & how (party, getting around + car consent, budget level + optional total, diet, stay) → Pace (cards with plain meaning, default window, rest block, "let the planner set my hours") → **What you love** (centered single column: descriptive vacation-type cards with mostly/also order, type-anything interests + destination suggestions, three guided prompts, live readback) → Must-visits (matched: Menu / Web-verified) → Review (every dimension with Edit links; day-by-day editable hours or planner-chosen; **Notes for the planner** list with examples such as car-rental optimisation). Free limits shown as small meters on the field; unavailable options fade. |
 | 3 | **Generating** | Human-readable steps with model/provider per step; live refinement log with reasons; resumable. |
-| 4 | **Plan view** | Day tabs; map with numbered pins, route line, other days muted; timeline with time · name · **one approximate total** · category · badges · travel legs · website; "Tonight's base" card with rationale, one suggested stay, Booking/Airbnb links; version dropdown; "How this plan was refined"; "Suggestions you can apply" (Plus); Export PDF / Docs / Share; Edit (gated). Place card on pin click: what, why, evidence, hours, booking note, website. |
+| 4 | **Plan view** | Day tabs; map with numbered pins, route line, other days muted; timeline with time · name · **one approximate total** · category · badges · travel legs · website; "Tonight's base" card with rationale, one suggested stay, Booking/Airbnb links; "Getting around" strip per day and "Car rental plan" card (§3.8); "Your notes" panel showing honoured / partial / not honoured; **"© OpenStreetMap contributors" attribution on the map corner** (§12); version dropdown; "How this plan was refined"; "Suggestions you can apply" (Plus); Export PDF / Docs / Share; Edit (gated). Place card on pin click: what, why, evidence, hours, booking note, website. |
 | 5 | **Can't fit** | Each violated constraint with the exact reason and options; free generation not consumed. |
 | 6 | **Upgrade** | Free vs Plus; shown on Edit / Regenerate / New plan for Free users. |
 | 7 | **My plans** | Status, versions (opens **Version history**: when, origin, what changed; View / Compare / Restore), shared state, monthly usage; queued plans show resume time. |
@@ -394,16 +419,132 @@ All admin writes go through the Worker (validated, audited). Config hot-reloads 
 | 0 · Foundations | zero-cost infra live | monorepo; Firebase Spark project; Worker with token verification; rules + emulator tests; CI; model registry + chain router + KV quota tracking; admin UID locks; locale registry | signed-in user calls a protected `/ping`; admin lock tests pass |
 | 1 · Menu for one region | Tuscany pack | scout stages 1–7; `places/packs/stayAreas`; admin Scouting panel | 1,000+ verified places with scores and evidence |
 | 2 · Plan engine | real Tuscany plan | Trip Brief (all steps); pipeline 1–11; scheduler; critic loop; gate; refinement log; Generating screen | golden briefs pass lint; a friend gets a half-decent plan |
-| 3 · Plan view & map | looks like a product | globe home + search (cities/regions/countries) + auth gate; MapLibre plan map; timeline; place cards; bases; share link; PDF; EN + HE | you'd send the link to someone |
-| 4 · Tiers & quotas | Free/Plus enforced | quota transactions; Upgrade screen; Stripe test mode + webhook; admin Users; Fast Pack | second Free plan blocked server-side; admin flips tiers |
-| 5 · Plus editing | edits reuse the engine | surgical edits; regenerate with versions; version history + restore + compare; apply suggestions; Google Docs export | edit without full regeneration |
-| 6 · Hardening | ready for strangers | App Check; rate limits; CSP; audit log; privacy + deletion; scheduled eval suite; more destinations seeded | §8 checklist green |
+| 3 · Plan view & map | looks like a product | globe home + search (cities/regions/countries) + auth gate; MapLibre plan map; timeline; place cards; bases; getting-around strip + car rental card; notes status; share link; PDF; EN + HE; **legal gates G-L1, G-L2** (attribution, AI label, privacy notice, licences page, deletion) | you'd send the link to someone |
+| 4 · Tiers & quotas | Free/Plus enforced | quota transactions; Upgrade screen; Stripe test mode + webhook; cancel-in-one-click; admin Users; Fast Pack; **legal gate G-L4 before live payments** | second Free plan blocked server-side; admin flips tiers |
+| 5 · Plus editing | edits reuse the engine | surgical edits; regenerate with versions; version history + restore + compare; apply suggestions; Google Docs export (**G-L3** OAuth verification) | edit without full regeneration |
+| 6 · Hardening | ready for strangers | App Check; rate limits; CSP; audit log; scheduled eval suite; more destinations seeded; takedown route; THIRD-PARTY-NOTICES; accessibility statement; **legal gate G-L5** counsel sign-off | §8 checklist and §13 gates green |
 
 Each phase gets its own implementation plan (writing-plans). Nothing in a later phase blocks an earlier one.
 
 ---
 
-## 12. Decisions log (from the brainstorm)
+## 12. Legal, rights & compliance
+
+> This section is the product's legal *design*: what must exist, where it must appear, and which decisions are already made. It is not legal advice. Every document listed in §12.2 is drafted from this section and reviewed by counsel before the public launch (§13).
+
+### 12.1 Ownership and rights
+
+| Asset | Rights holder | Terms |
+|---|---|---|
+| Platform: code, design, UI, taxonomy, prompts, scheduler, model registry, brand and name | **The company** — "© [Company] [year]. All rights reserved." in the footer, PDF footer and repo `LICENSE` (proprietary, all rights reserved; not open source) | No licence granted to users beyond using the service |
+| User inputs: the brief, notes, custom entries, must-visits | **The user** | User grants the company a limited licence to process them to provide the service and to use **anonymised, aggregated** derivatives (e.g. promoting frequent custom tags to built-ins). Never sold, never used to identify the user |
+| Generated plans (itinerary, narrative, exported PDF/Doc) | **The user** — the plan is theirs to keep, print, export, share and use for any personal or commercial purpose, forever, including after cancelling Plus or deleting the account (they keep their exports) | The company retains rights in the *format, templates and structure*; the company does not publish or resell users' plans; share pages exist only while the user keeps them live |
+| The place menu (`places`, `packs`) | Company database; **derived from OpenStreetMap and other sources** | Used internally to produce plans ("Produced Works" under ODbL → attribution required). The derived database is never distributed publicly as data, so ODbL share-alike is not triggered; if that ever changes, the OSM-derived parts must be released under ODbL |
+| Third-party content (evidence quotes, photos, descriptions) | Their respective owners | Stored as short quotations with source link; Wikipedia text under CC BY-SA with attribution; Wikidata CC0; photos only from Wikimedia Commons with licence recorded; takedown route in §12.6 |
+
+Both principles the owner asked for are therefore explicit: **all rights in the platform are reserved to the company, and all rights in their own inputs and plans are reserved to the user.**
+
+### 12.2 Documents to publish (all on our own domain, linked from every page footer and the OAuth consent screen)
+
+| Document | Must cover | Legal driver |
+|---|---|---|
+| **Terms of Service** | service description; account rules (Google sign-in, one account per person, 18+ to pay); free vs Plus; acceptable use; ownership (§12.1); AI disclaimers (§12.3); third-party links; suspension/termination; limitation of liability; governing law (Israel) with mandatory consumer law of the user's residence preserved; dispute resolution; changes to terms with notice | Israeli Contract & Consumer Protection Law; EU CRD if EU users |
+| **Privacy Policy** | §12.4 in plain language, plus the Google **Limited Use** statement: "The use of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements." | Israel PPL §11 notice duty; GDPR Arts. 13–14; Google API Services User Data Policy |
+| **Cookie & storage notice** | only strictly-necessary storage (Firebase Auth session, App Check token, UI language); no analytics/marketing cookies in v1; if analytics is ever added → consent banner first | ePrivacy / Israeli PPL |
+| **Subscription, Cancellation & Refund Policy** | price incl. tax, currency, billing interval, auto-renewal, how to cancel (one click, no harder than sign-up), effect at period end, 14-day withdrawal for distance contracts with consent to immediate performance, refund on technical failure to generate | Israeli Consumer Protection Law (distance & ongoing transactions); EU CRD Art. 6/11a; UK DMCCA |
+| **AI & Travel Disclaimer** | itinerary is AI-generated; may be inaccurate or outdated; verify hours, prices, availability, entry rules, visas, health & safety; we are **not** a travel agent, tour operator or booking intermediary; we make no bookings; third-party venues are independent | EU AI Act Art. 50 (from 2 Aug 2026); consumer law |
+| **Data licences & attribution page** | §12.5 table verbatim; open-source notices | ODbL, CC BY-SA, provider ToS |
+| **Accessibility statement** | conformance target WCAG 2.1 AA; contact for barriers | Israeli Standard IS 5568 (websites); EU Accessibility Act for e-commerce |
+| **Report / correct a place** | how a venue or individual requests correction or removal of a listing or quote | Notice-and-takedown; PPL correction right |
+| **Contact / legal notice** | company name, registration number, address, legal@ and privacy@ mailboxes | Israeli law; EU e-commerce information duties |
+
+Hebrew and English versions of all documents; the Hebrew version governs for Israeli consumers.
+
+### 12.3 AI transparency and disclaimers — in the product, not only in documents
+
+- First planning screen and the Generating screen state: "Your itinerary is generated by an AI planner from verified place data. Check hours and prices before you go."
+- Every plan, PDF and share page carries an **"AI-generated itinerary"** label and the verification reminder in the footer.
+- Model used per step is recorded (§3.4) and visible in "How this plan was made" — supports transparency and complaints handling.
+- No chat persona; the product never implies a human planner.
+- Affiliate disclosure is added the day any Booking/Airbnb/rental link becomes an affiliate link.
+
+### 12.4 Privacy design
+
+| Item | Decision |
+|---|---|
+| Controller | The company (owner as privacy contact; no DPO required under Israeli law for this profile — re-assess if data on > 100,000 people or sensitive categories) |
+| Data collected | Google account id, name, email, photo URL; brief, notes, plans, versions; usage counters; IP and App Check tokens for abuse prevention (short-lived); Stripe customer/subscription ids (**never card data**); admin audit entries |
+| Sensitive data | Diet, accessibility and religious-observance notes are **health/religion-adjacent**: collected only as the user types them, used solely to plan, never profiled, deletable with the plan. The privacy policy names this explicitly and the sign-in notice mentions it |
+| Purposes & legal bases | Provide the service (contract); abuse prevention and security (legitimate interest); optional future analytics (consent) |
+| Processors | Google (Firebase Auth/Firestore/Hosting; Gemini API — **free tier prompts may be used by Google to improve its models; disclosed in the policy and on the brief's first screen**), Cloudflare, OpenRouter and its upstream model providers (free routes may log prompts; disclosed), Tavily, OpenRouteService/HeiGIT, OpenStreetMap Foundation (Nominatim), Stripe, GitHub. Processor DPAs/standard terms recorded in the database definition document |
+| Prompt minimisation | Prompts never contain the user's name, email or account id; only the brief content and place data. Plan IDs, not user IDs, appear in provider logs |
+| Cross-border transfers | Data stored in Google Cloud (region chosen at project creation, EU or US) and processed by the providers above; disclosed |
+| Retention | Plans/versions until the user deletes them or the account; logs 30 days; caches 90 days; Stripe records per tax law (7 years); backups rolled within 30 days |
+| Rights | Access, correction, deletion (account + all plans, one button, §8); export (PDF/JSON) so portability is met where it applies; Israeli law: correction/deletion of inaccurate data; GDPR: erasure, objection, portability; CCPA: we do not sell data |
+| Israel Amendment 13 specifics | Notice at collection (sign-in screen and first brief screen: what, why, recipients, consequences of refusal, rights, contact); **database definition document** maintained in `docs/legal/`; Data Security Regulations basic/medium tier controls documented; security-incident log and response procedure; no registration required (not a data broker, not a public body) |
+| Children | Service for 18+; under-18s may not create accounts; payment requires 18+ |
+
+### 12.5 Third-party terms and attribution (build requirements)
+
+| Source | Licence / policy | What the app must do |
+|---|---|---|
+| OpenStreetMap (Overpass, Nominatim, tiles' data) | ODbL | Show **"© OpenStreetMap contributors"** linked to openstreetmap.org/copyright in a corner of **every** map view, every PDF map image, every share page; list on the licences page |
+| Nominatim public API | Usage policy | ≤ 1 req/s; identifying `User-Agent` with contact email; cache results (`geocodeCache`); attribution; **commercial caveat** — plan migration to self-hosted Nominatim or a commercial geocoder before scale (roadmap item) |
+| OpenFreeMap tiles | Free public tiles | Attribution "OpenFreeMap · © OpenMapTiles · © OpenStreetMap contributors" |
+| OpenRouteService | Free API terms | Attribution "© openrouteservice.org by HeiGIT"; respect 2,000/day; cache |
+| Wikidata | CC0 | Attribution optional; we credit "Data from Wikidata" |
+| Wikipedia excerpts | CC BY-SA 4.0 | Attribute with link on the place card; keep excerpts short or rewrite (our blurbs are LLM-written from facts, not copied) |
+| Wikimedia Commons photos | per-file licence | Store licence + author; display credit on the place card |
+| Google (Sign-In, Drive/Docs `drive.file`) | Google API Services User Data Policy | Privacy policy on our domain, linked in OAuth consent; Limited Use statement; request `drive.file` only, lazily; complete OAuth brand verification before public launch |
+| Gemini API | Gemini API Additional Terms, Prohibited Use Policy | Disclose free-tier data use; no prohibited content; comply with rate limits |
+| OpenRouter, Tavily, Cloudflare, GitHub, Stripe | provider ToS | Accept; record in processor list; Stripe requires a registered business and complete "business details" before live mode |
+| Web pages mined for trends | site ToS, copyright | Respect `robots.txt`; fetch only public pages; store **short quotes + URL** (quotation/fair-use scale), never full articles; honour takedown requests within 7 days |
+| TikTok, Instagram, Reddit names in badges | trademark law | **Nominative use only** ("mentioned on TikTok"); footer disclaimer "Not affiliated with or endorsed by TikTok, Instagram or Reddit"; never use their logos; never scrape their platforms |
+| Open-source libraries (MapLibre BSD-3, pdf-lib MIT, React MIT, etc.) | OSS licences | Generated THIRD-PARTY-NOTICES file shipped with the app and linked from the licences page |
+
+### 12.6 Businesses and other people in the data
+
+Places are businesses and public sites; listing public facts about them is lawful. Rules: never store personal names of reviewers or posters from mined pages; store only the venue-relevant quote; provide "Report or correct this place" so a venue can fix hours, ask for a quote's removal, or ask to be delisted (honoured within 7 days unless the fact is plainly public and accurate); log requests in `auditLog`.
+
+### 12.7 Payments and consumer protection (Phase 4 gate)
+
+- Before checkout: total price with tax, currency, billing interval, auto-renewal statement, cancellation route, links to Terms/Privacy/Refund; button labelled "Subscribe — pay €X/month" (an unambiguous obligation-to-pay label).
+- **Cancel in one click** from Account, effective at period end, with e-mail confirmation on a durable medium; a persistent "Cancel subscription" control (EU electronic withdrawal function, in force since 19 June 2026).
+- 14-day withdrawal: the user consents to immediate performance at checkout and is told the consequence; refund in full if the service failed to generate a plan for technical reasons.
+- Israeli consumers: Hebrew terms, Consumer Protection Law distance-transaction cancellation rights and "ongoing transaction" (עסקה מתמשכת) cancellation rules honoured; VAT-inclusive prices; invoices via Stripe.
+- Renewal reminders where required (UK DMCCA); price changes with 30 days' notice and an easy opt-out.
+- Live mode requires: registered business entity, Stripe business verification, tax setup, and counsel sign-off (§13).
+
+---
+
+## 13. Legal team & governance
+
+There is no in-house legal team; this is the **process** that substitutes for one.
+
+| Role | Who | Responsibility |
+|---|---|---|
+| Owner / controller / privacy contact | The founder | Owns the legal documents, the database definition document, the processor list, incident response; answers privacy@ and legal@ |
+| External counsel (Israel) | To be engaged before Phase 4 | Reviews ToS, Privacy, Refund policy, Hebrew versions, consumer-law compliance, company formation, trademark clearance of the final name |
+| EU/consumer-law check | Same counsel or a specialist | Only if EU users are targeted (EU-language marketing, euro pricing, or > 10% EU sign-ups): CRD, AI Act Art. 50, GDPR representative question |
+| Security & privacy reviewer | Founder + optional external pen-test | §8 checklist before Phase 6; annual review |
+| Accountant | To be engaged before Phase 4 | Israeli VAT, invoicing, Stripe payouts |
+
+**Legal gates in the roadmap**
+
+| Gate | Phase | Must be true before the phase is "done" |
+|---|---|---|
+| G-L1 Attribution | 3 (Plan view) | OSM/OpenFreeMap/ORS attribution visible on every map, PDF and share page; licences page live; AI-generated label on plans |
+| G-L2 Notice & privacy | 3 | Privacy notice at sign-in and first brief; Privacy Policy and AI Disclaimer published (draft, founder-reviewed); account deletion works |
+| G-L3 Google verification | 5 (Docs export) | OAuth consent screen verified with privacy policy on our domain; Limited Use statement live |
+| G-L4 Commerce | 4 (Tiers) — before flipping payments to live | Company registered; ToS, Refund policy, Hebrew versions reviewed by counsel; Stripe business verified; cancel-in-one-click implemented; VAT handled |
+| G-L5 Public launch | 6 (Hardening) | Counsel sign-off on all documents; database definition document and incident procedure complete; takedown route live; trademark cleared; THIRD-PARTY-NOTICES generated; accessibility statement published |
+| Ongoing | — | Annual document review; re-check provider terms quarterly (free tiers change); log every takedown/correction request |
+
+**Repository artefacts**: `LICENSE` (proprietary), `docs/legal/` with drafts of every §12.2 document, the database definition document, the processor list, the incident-response procedure, and a `LEGAL-CHECKLIST.md` mirroring the gates above. Drafts are marked "for counsel review — not yet in force" until G-L4/G-L5.
+
+---
+
+## 14. Decisions log (from the brainstorm)
 
 | Decision | Choice | Why |
 |---|---|---|
@@ -429,11 +570,18 @@ Each phase gets its own implementation plan (writing-plans). Nothing in a later 
 | Brief budget | 300 chars total on Free across three guided prompts | precise, not an essay |
 | Versions | immutable, never deleted, restore = copy, free | safe to experiment |
 | Destinations | cities, regions, countries, custom lists; scopes in popover | "Tel Aviv" must work |
+| Notes for the planner | free-form notes classified as constraint / preference / optimisation goal / info; honoured status shown | the form can't anticipate everything (e.g. car-rental optimisation) |
+| Car rental | modelled as a costed resource with pick-up/drop-off segments, one-way allowed | don't pay for a parked car |
+| Rights | platform © company, all rights reserved; user owns inputs and plans | owner decision |
+| Legal process | no in-house team; counsel gates before payments and public launch; documents drafted in repo | zero-cost until money changes hands |
 
-## 13. Open items (not blocking phase 0)
+## 15. Open items (not blocking phase 0)
 
-- Product name (placeholder "Wayfare").
+- Product name (placeholder "Wayfare") — needs trademark clearance (§13).
+- Company entity and registration (needed before payments go live).
 - Plus price.
+- Firestore/Google Cloud data region (EU vs US) — decide at project creation; affects the privacy policy.
+- Nominatim exit plan (self-host vs commercial geocoder) before scale.
 - Whether to make the optional one-time $10 OpenRouter credit purchase (raises the shared free pool from 50 to 1,000/day). Default: no.
 - Exact set of ~30 seeded destinations.
 - Compare-versions UI detail (phase 5).
