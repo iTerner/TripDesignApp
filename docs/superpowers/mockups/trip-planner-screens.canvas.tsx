@@ -2158,11 +2158,65 @@ function MyPlansScreen() {
 // Screen 8 — Admin
 // ---------------------------------------------------------------------------
 
-const ADMIN_TABS = ["Magic numbers", "Model registry", "Users", "Scouting", "Quota & health"];
+const ADMIN_TABS = ["Overview", "Magic numbers", "Model registry", "Users", "Scouting", "Quota & health"];
+
+// 30-day series for the Overview sparklines (mock data).
+const SERIES_USERS = [412, 418, 425, 431, 440, 452, 460, 466, 471, 483, 495, 502, 510, 521, 530, 538, 547, 559, 566, 574, 588, 596, 604, 617, 625, 633, 642, 655, 661, 668];
+const SERIES_DAU = [38, 41, 35, 44, 52, 61, 48, 40, 43, 55, 63, 58, 47, 49, 66, 71, 60, 52, 57, 69, 74, 66, 58, 61, 78, 82, 70, 64, 69, 84];
+const SERIES_PLANS = [9, 11, 8, 12, 15, 19, 13, 10, 12, 16, 21, 17, 12, 14, 22, 25, 18, 15, 17, 23, 27, 21, 16, 18, 29, 31, 24, 20, 22, 38];
+
+function Sparkline({ data, color, height = 36 }: { data: number[]; color: string; height?: number }) {
+  const w = 160;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const pts = data
+    .map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(height - 3 - ((v - min) / Math.max(1, max - min)) * (height - 6)).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg width={w} height={height} viewBox={`0 0 ${w} ${height}`} aria-hidden>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} />
+      <circle cx={w} cy={height - 3 - ((data[data.length - 1] - min) / Math.max(1, max - min)) * (height - 6)} r={2.5} fill={color} />
+    </svg>
+  );
+}
+
+function Kpi({
+  value,
+  label,
+  delta,
+  series,
+  tone,
+}: {
+  value: string;
+  label: string;
+  delta?: string;
+  series?: number[];
+  tone?: "success" | "danger" | "warning" | "info";
+}) {
+  const t = useHostTheme();
+  return (
+    <div style={{ padding: "12px 14px", border: `1px solid ${t.stroke.secondary}`, borderRadius: 8, minWidth: 0 }}>
+      <Stack gap={6}>
+        <Text size="small" tone="tertiary">{label}</Text>
+        <Row gap={10} align="end">
+          <div style={{ fontSize: 24, fontWeight: 590, lineHeight: "28px", color: tone === "danger" ? t.category.red : tone === "warning" ? t.category.orange : t.text.primary }}>
+            {value}
+          </div>
+          {delta && (
+            <Text size="small" tone="secondary" style={{ paddingBottom: 3 }}>
+              {delta}
+            </Text>
+          )}
+        </Row>
+        {series && <Sparkline data={series} color={t.accent.primary} />}
+      </Stack>
+    </div>
+  );
+}
 
 function AdminScreen() {
   const t = useHostTheme();
-  const [tab, setTab] = useCanvasState<number>("adminTab", 1);
+  const [tab, setTab] = useCanvasState<number>("adminTab", 0);
   return (
     <Frame url="wayfare.app/admin · re-authenticated 4 min ago">
       <TopNav signedIn tier="Plus" lang="en" onLang={() => undefined} />
@@ -2176,6 +2230,51 @@ function AdminScreen() {
         <Pill size="sm">owner · uid ····9f21</Pill>
       </Row>
       {tab === 0 && (
+        <Stack gap={14}>
+          <Row gap={8} align="center">
+            <Text weight="semibold">Today · Sun 20 Sep</Text>
+            <Spacer />
+            <Text size="small" tone="quaternary">from metrics/global + metricsDaily · ~32 reads per load · refreshed every minute</Text>
+          </Row>
+          <Grid columns={3} gap={10}>
+            <Kpi label="Users" value="668" delta="+7 today" series={SERIES_USERS} />
+            <Kpi label="Daily active users" value="84" delta="WAU 231 · MAU 512" series={SERIES_DAU} />
+            <Kpi label="Plans generated" value="38" delta="last 7 days: 183" series={SERIES_PLANS} />
+          </Grid>
+          <Grid columns={4} gap={10}>
+            <Kpi label="Sign-ins today" value="121" delta="+18% vs 7-day avg" />
+            <Kpi label="Plus subscriptions" value="47" delta="+2 today · 0 cancelled" />
+            <Kpi label="Free → Plus conversion" value="8.1%" delta="of users who used their free plan" />
+            <Kpi label="Median generation" value="1.9 min" delta="p90 3.4 min" />
+          </Grid>
+          <Grid columns="1fr 1fr" gap={12} align="start">
+            <Stack gap={6}>
+              <Text weight="medium" size="small">Top destinations · 7 days</Text>
+              <Table
+                headers={["Destination", "Plans", "Menu", "Asks from cache"]}
+                rows={[
+                  ["Tuscany", "61", "1,340 scouted · 87 user-found", "78%"],
+                  ["Rome", "39", "980 · 41", "71%"],
+                  ["Tel Aviv", "24", "Fast Pack 240 · 12", "35%"],
+                  ["Kyoto & Osaka", "19", "760 · 9", "64%"],
+                  ["Lisbon", "14", "Fast Pack 210 · 6", "29%"],
+                ]}
+                columnAlign={["left", "right", "left", "right"]}
+              />
+            </Stack>
+            <Stack gap={6}>
+              <Text weight="medium" size="small">Health · today</Text>
+              <Grid columns={2} gap={10}>
+                <Kpi label="Gate failures" value="1" delta="2.6% of runs" tone="warning" />
+                <Kpi label="Queued for quota reset" value="2" tone="warning" />
+                <Kpi label="Best-chain calls left" value="41" delta="of ~360 across chain" />
+                <Kpi label="Flagged places" value="3" delta="awaiting re-verification" />
+              </Grid>
+            </Stack>
+          </Grid>
+        </Stack>
+      )}
+      {tab === 1 && (
         <Stack gap={10}>
           <Table
             headers={["Setting", "Chill", "Balanced", "Packed", "Default", "Last change"]}
@@ -2203,7 +2302,7 @@ function AdminScreen() {
           </Row>
         </Stack>
       )}
-      {tab === 1 && (
+      {tab === 2 && (
         <Stack gap={12}>
           <Row gap={8} align="center">
             <Text weight="semibold">Best chain · plan-time reasoning</Text>
@@ -2245,7 +2344,7 @@ function AdminScreen() {
           </Row>
         </Stack>
       )}
-      {tab === 2 && (
+      {tab === 3 && (
         <Stack gap={10}>
           <TextInput placeholder="Search by email or uid…" type="search" />
           <Table
@@ -2259,11 +2358,11 @@ function AdminScreen() {
           <Note>Overrides require a reason and are written as tierSource=admin so Stripe webhooks don't undo them. Every action lands in the audit log.</Note>
         </Stack>
       )}
-      {tab === 3 && (
+      {tab === 4 && (
         <Table
-          headers={["Destination", "Status", "Places", "Trending", "Last scout", ""]}
+          headers={["Destination", "Status", "Places (scouted · user-found)", "Trending", "Last scout", ""]}
           rows={[
-            ["Tuscany", "ready", "1,340", "212", "3 days ago", <Row gap={6}><Button variant="ghost">Refresh trends</Button><Button variant="ghost">Full scout</Button></Row>],
+            ["Tuscany", "ready", "1,340 · 87", "212", "3 days ago", <Row gap={6}><Button variant="ghost">Refresh trends</Button><Button variant="ghost">Full scout</Button></Row>],
             ["Rome", "ready", "980", "164", "9 days ago", <Row gap={6}><Button variant="ghost">Refresh trends</Button><Button variant="ghost">Full scout</Button></Row>],
             ["Kyoto", "stale", "760", "88", "41 days ago", <Button variant="secondary">Scout now</Button>],
             ["Lisbon", "building", "Fast Pack · 240", "31", "running · 00:48", <Button variant="ghost">View log</Button>],
@@ -2271,7 +2370,7 @@ function AdminScreen() {
           rowTone={["success", "success", "warning", "info"]}
         />
       )}
-      {tab === 4 && (
+      {tab === 5 && (
         <Stack gap={12}>
           <Grid columns={4} gap={12}>
             <Stat value="38" label="Plans today" />

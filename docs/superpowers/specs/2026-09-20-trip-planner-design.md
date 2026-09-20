@@ -173,9 +173,9 @@ Browser-driven pipeline; each step is a short Worker call or local code; progres
 
 ### 3.2 Steps
 
-1. **Menu ready?** Load pack slice for the destination scope; else run **Fast Pack** (§4.3).
+1. **Menu ready?** Load pack slice for the destination scope; else run **Fast Pack** (§4.4).
 2. **Brief → Trip Profile** *(LLM, JSON schema)*: taxonomy weights (ordered mix, custom types mapped), hard constraints (diet, accessibility, budget total, `carRentalOk`), explicit asks, must-visits resolved to menu IDs or flagged for gap search, energy budget from pace, hours policy.
-3. **Gap search** *(conditional, 1–2 LLM calls)*: explicit asks / must-visits / custom entries without menu match → targeted web search → extraction → geocode → verification → join candidates and menu (`source: user_request`).
+3. **Gap search** *(conditional, 0–2 LLM calls)*: explicit asks / must-visits / custom entries without menu match → **first the ask index and place index (§4.3, no web call)** → only on a miss: targeted web search → extraction → geocode → verification → join candidates and write back to the menu (`source: user_request`) and the ask index.
 4. **Shortlist** *(code)*: score every menu place against the profile (category weights × fame/trend × constraints × season × budget) → top ~150–200 grouped by area.
 5. **Selection & skeleton** *(LLM, IDs only)*: base area per night, areas per day, ~N candidate stops per day with priority rank and one-line "why". Unknown IDs → cheap repair call.
 6. **Scheduler** *(code, browser)*: per day order stops using the ORS matrix; obey opening hours, that day's window, meals from food places in the right area, rest block (Chill/Balanced), check-in/out, arrival/departure anchors, drives between bases. Each stop gets one **approximate total** (dwell + queue + buffers; breakdown stored, not shown). Over budget → drop lowest-priority optional stop. Must-visits pinned; unfittable → precise reason.
@@ -281,7 +281,22 @@ Refresh: stage 3 weekly, stage 2 monthly; `stale` after 30 days. Cost ≈ 60–7
 
 Badges: **Trending now** (with platform icons and the evidence quote + source link on the card), **Classic must-see**, **Must-visit**, **Added by reviewer**, **Web-verified**.
 
-### 4.3 Fast Pack
+### 4.3 The menu learns: reuse before re-fetch
+
+Every activity the LLM finds outside the original menu becomes a permanent, reusable part of it. The loop:
+
+1. **Match before search.** In pipeline step 3, each unmatched ask (a must-visit, an interest, a custom entry, a note phrase like "kosher restaurant in Lucca") is first matched against what earlier users already caused us to find:
+   - **Ask index** `asks/{destSlug}/{askId}`: normalised ask text, tags, an embedding (Gemini embedding model, free tier), the `placeIds` that satisfied it, `hitCount`, `lastUsedAt`. Cosine ≥ 0.85 **or** tag + area match → reuse those places, no web call.
+   - **Place index**: category/tag/area filter over `places` for the destination (e.g. `food.restaurant` + `kosher` + `Lucca`).
+2. **Search only on a miss**, then **write back**: new places are stored in `places/*` with `source: user_request`, `verification: {geocoded: true, sources: [...], count: 1}`, the ask is stored in `asks/*` pointing at them, and the pack index gets an incremental entry (`packs/{slug}/additions/*`, folded into the main index on the next deep scout).
+3. **Enrich to menu quality.** Gap-found places receive the same enrichment as scouted ones (dwell, effort, hours, price, blurb) either inline (1 batched call) or in the next scout run, so the next user sees a first-class place, not a stub.
+4. **Learn from choices, not only searches.** `placeStats/{placeId}`: `timesShortlisted`, `timesSelected`, `timesKeptAfterEdit`, `timesRemovedByUser`, `timesFlagged`, plus a small histogram over trip-profile signatures (party × pace × top-2 vacation types, anonymised). Step 4's shortlist scoring adds a **learned score** from these, so "couples on a Foodie/Wine trip kept this place" lifts it for similar briefs — the "similar users" effect without any personal data.
+5. **Quality control.** Users can flag a stop (closed / doesn't exist / wrong place / not as described) from the place card. Flags increment `timesFlagged`; a place over threshold is hidden from selection and queued for re-verification in the next scout run; confirmed dead places are tombstoned (kept for old plan versions, never selected again).
+6. **Growth is visible.** The admin Scouting panel shows per destination: scouted vs user-found places, asks served from cache vs searched, top unmet asks (candidates for a targeted scout).
+
+Result: web search cost per plan falls over time, the menu grows exactly where users push it, and every user benefits from every previous user's gap search.
+
+### 4.4 Fast Pack
 
 Miniature of stages 1–5 executed by the Worker/browser pipeline for the brief's scope and vacation types (≈ 6–10 searches, 2–3 extraction calls, 2–3 enrichment calls). Marks the destination `building` and dispatches a deep scout for next time. If < 60 places, the plan shows a "limited coverage" banner.
 
@@ -319,18 +334,40 @@ Design principles: one accent colour; calm spacing; limits visible but not naggi
 | `plans/{planId}/versions/{vId}` | ordinal | immutable itinerary (days → stops with placeId, times, approx total + breakdown, travel leg, why, tips, badges; bases; metrics; narrative per language), `origin: original|regenerate|edit|restore|apply-suggestion`, `restoredFrom`, summary | Worker |
 | `shares/{shareId}` | 128-bit random | public copy of one version, itinerary only, `revokedAt` | Worker; public read |
 | `destinations/{slug}` | slug | name(s), kind, geometry, areas, status, `lastScoutedAt`, counts | Scout |
-| `places/{placeId}` (+ `evidence/*`) | stable hash | place record (§1.3) | Scout, Worker (gap search) |
-| `packs/{slug}` (+ `chunks/*`) | slug | compact prompt index | Scout |
+| `places/{placeId}` (+ `evidence/*`) | stable hash of (normalised name, ~coords) | **the activity record** (§1.3) + `source: scout|user_request|admin`, `verification {geocoded, sources[], count}`, `status: active|hidden|tombstoned`, `firstSeenAt`, `lastVerifiedAt` | Scout, Worker (gap search), admin |
+| `placeStats/{placeId}` | placeId | `timesShortlisted`, `timesSelected`, `timesKeptAfterEdit`, `timesRemovedByUser`, `timesFlagged`, profile-signature histogram (§4.4) | Worker (increments) |
+| `placeFeedback/{id}` | random | `placeId`, `planId`, `kind: closed|missing|wrong_place|inaccurate`, note, `createdAt` (no uid stored) | Worker |
+| `asks/{destSlug}/items/{askId}` | hash of normalised ask | ask text, tags, embedding, `placeIds[]`, `hitCount`, `lastUsedAt` (§4.4) | Worker |
+| `packs/{slug}` (+ `chunks/*`, `additions/*`) | slug | compact prompt index; `additions` = user-found places pending fold-in | Scout, Worker |
 | `stayAreas/{slug}` | slug | zones, rationale, examples | Scout |
 | `geocodeCache/*`, `routeCache/*` | hash | cached provider responses, TTL | Worker, Scout |
 | `config/current`, `configVersions/{n}` | — | magic numbers, tier limits, chains, flags, `changedBy/At/reason` | Worker (admin) |
 | `llmModels/{id}` | model id | registry entry | Worker (admin), eval job |
-| `usageDaily/{provider}_{date}` | — | counters | Worker |
+| `usageDaily/{provider}_{date}` | — | provider request counters | Worker |
+| `metrics/global` | — | `totalUsers`, `totalPlans`, `activeSubscriptions` (running counters) | Worker |
+| `metricsDaily/{date}` | yyyy-mm-dd | `signIns`, `newUsers`, `activeUsers`, `plansGenerated`, `plansQueued`, `gateFailures`, `edits`, `exports`, `upgrades`, `cancellations`, `generationMsSum/Count`, per-destination plan counts (§7.1) | Worker (increments) |
 | `auditLog/*` | random | admin actions, tier changes, daily summary | Worker |
 | `subscriptions/{uid}` | uid | Stripe ids, status, period end | Worker (webhook) |
 | `scoutRuns/*` | random | logs, counts, errors | Scout |
 
 **Versions are immutable and never deleted.** Restore copies the chosen version to a new one (`origin: restore`); costs nothing; not metered. Share links point at a version.
+
+### 6.1 How the four core entities relate
+
+```
+users/{uid} ──< plans/{planId} ──< versions/{vId}
+                                       │  stops[] reference places by placeId
+                                       │  AND embed a snapshot {name, coords, category, approxTotal}
+                                       ▼
+                         places/{placeId}  (the canonical activity; grows via scouting and gap search)
+                              │  placeStats, placeFeedback, evidence
+                              └─ referenced by asks/* and packs/*
+```
+
+- **Activities are canonical and shared** across all users and destinations: one `places` document per real-world place, however it was discovered. Plans point to it by id.
+- **Versions embed a snapshot** of each stop's name, coordinates, category and approximate total, so an old plan renders identically even if the place is later corrected, hidden or tombstoned. Live fields (opening hours, website, flags) are read from `places` at view time and shown as "current info".
+- **Users own plans; plans own versions; nothing owns places.** Deleting a user deletes their plans and versions (and their share snapshots) but never touches `places`, `asks` or `placeStats`, which hold no personal data.
+- **Activity in the analytics sense** (sign-ins, generations, edits, exports) is stored only as **counters** in `metricsDaily`/`metrics` and as per-user counters in `users/{uid}/usage`; no per-event log of user behaviour is kept beyond the structured Worker logs (30 days, uid + plan id only).
 
 **Rules:** deny by default; owner reads own `users/plans/versions/usage`; public reads `destinations`, `places`, unrevoked `shares`; the only client write is `plans.brief` while `drafting`. Everything else Worker-only.
 
@@ -340,14 +377,35 @@ Design principles: one accent colour; calm spacing; limits visible but not naggi
 
 Route `/admin`, lazy chunk served only after a verified admin token (hygiene; enforcement is §8).
 
+### 7.1 Overview KPIs (first panel)
+
+A small, deliberately short set of metrics — read from two documents (`metrics/global`, `metricsDaily/{today}`) plus the last 30 `metricsDaily` docs for sparklines, so the dashboard costs ≈ 32 Firestore reads per load.
+
+| KPI | Definition | Source |
+|---|---|---|
+| Users | total accounts | `metrics/global.totalUsers` (incremented by the Worker on a user's first verified token) |
+| New users today | accounts created today | `metricsDaily.newUsers` |
+| Sign-ins today | successful Google sign-ins (first Worker request per session, detected via the token's `auth_time` being newer than the user's `lastAuthTime`) | `metricsDaily.signIns` |
+| DAU · WAU · MAU | distinct users with ≥ 1 authenticated request today / last 7 days / last 30 days | `activeUsers` is incremented once per user per day when `users/{uid}.lastActiveDate != today` (transaction); WAU/MAU are computed by the Worker nightly from `users.lastActiveDate` and stored on `metricsDaily` |
+| Plans generated today · 7 days | completed generations | `metricsDaily.plansGenerated` |
+| Median generation time | `generationMsSum / generationMsCount` (mean shown; p50 from a small bucket histogram) | `metricsDaily` |
+| Gate failure rate | `gateFailures / (plansGenerated + gateFailures)` | `metricsDaily` |
+| Active Plus subscriptions · upgrades today · cancellations today | | `metrics/global.activeSubscriptions`, `metricsDaily.upgrades/cancellations` (Stripe webhook) |
+| Free → Plus conversion | active subscriptions ÷ users who used their free plan | derived |
+| Top destinations (7 days) | plan counts per destination | `metricsDaily.byDestination` map |
+| Quota health | best-chain requests remaining today; queued plans | `usageDaily`, `plans` where `status = queued` |
+
+Sparklines for the last 30 days on users, plans and DAU. No third-party analytics; no per-user event tracking.
+
 | Panel | Capabilities |
 |---|---|
+| **Overview** | the KPIs above with 30-day sparklines |
 | Magic numbers | pace caps, effort factors, day-window defaults, rest blocks, queue buffers, shortlist size, refinement iterations per tier, Fast Pack size, day-trip radius, energy constants — save as config version, revert |
 | Tiers & limits | §1.4 table editable; Plus price placeholder; add tier |
 | Model registry | reorder chains, enable/disable, live per-model usage vs observed limit, override limits, "scouting uses Best chain", eval scores |
 | Users | search; tier override with reason (`tierSource: admin`, Stripe cannot undo); reset free generation; disable |
 | Plans | recent plans, status, model per step, iterations, gate failures with the violated constraint; read-only open |
-| Scouting | destination statuses, counts, "Scout now" / "Refresh trends", last run log |
+| Scouting | destination statuses, counts (scouted vs user-found places), asks served from cache vs searched, top unmet asks, flagged places awaiting re-verification, "Scout now" / "Refresh trends", last run log |
 | Quota & health | per-provider daily usage vs caps (Gemini, OpenRouter, search, ORS, Nominatim, Firestore, Worker), queued plans, error rate, median generation time |
 | Feature flags | payments live/test, Docs export, Fast Pack, new-destination scouting, maintenance banner |
 | Custom entries | anonymous aggregate of user-typed categories for promotion to built-ins |
