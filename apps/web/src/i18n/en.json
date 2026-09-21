@@ -1,0 +1,20 @@
+{
+  "app": { "name": "Wayfare", "tagline": "Plan a trip you'll actually take." },
+  "auth": {
+    "signIn": "Sign in with Google",
+    "signOut": "Sign out",
+    "signedInAs": "Signed in as {{email}}"
+  },
+  "ping": {
+    "call": "Call protected /ping",
+    "result": "Server time {{time}} · uid {{uid}}",
+    "firstSeen": "Welcome — your account was just created."
+  },
+  "admin": {
+    "title": "Admin",
+    "ping": "Admin ping",
+    "llmPing": "Test LLM chain",
+    "forbidden": "This area is for the owner only."
+  },
+  "lang": { "label": "Language", "soon": "soon" }
+}

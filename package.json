@@ -12,6 +12,7 @@
     "test": "pnpm -r --parallel --filter \"!@wayfare/firebase-rules\" test",
     "build": "pnpm -r build",
     "secret-scan": "pnpm --filter @wayfare/tools secret-scan",
+    "scan:bundle": "pnpm --filter @wayfare/web build && pnpm --filter @wayfare/tools exec vitest run test/bundleSecrets.test.ts",
     "prepare": "simple-git-hooks"
   },
   "simple-git-hooks": {

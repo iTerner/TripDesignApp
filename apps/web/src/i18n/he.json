@@ -1,0 +1,20 @@
+{
+  "app": { "name": "Wayfare", "tagline": "מתכננים טיול שבאמת תעשו." },
+  "auth": {
+    "signIn": "התחברות עם Google",
+    "signOut": "התנתקות",
+    "signedInAs": "מחובר/ת בתור {{email}}"
+  },
+  "ping": {
+    "call": "קריאה ל‑/ping מוגן",
+    "result": "זמן שרת {{time}} · מזהה {{uid}}",
+    "firstSeen": "ברוכים הבאים — החשבון נוצר כרגע."
+  },
+  "admin": {
+    "title": "ניהול",
+    "ping": "בדיקת מנהל",
+    "llmPing": "בדיקת שרשרת המודלים",
+    "forbidden": "האזור הזה מיועד לבעלים בלבד."
+  },
+  "lang": { "label": "שפה", "soon": "בקרוב" }
+}

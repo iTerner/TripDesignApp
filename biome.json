@@ -16,5 +16,6 @@
     "enabled": true,
     "rules": { "preset": "recommended", "suspicious": { "noExplicitAny": "error" } }
   },
-  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } }
+  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
+  "css": { "parser": { "tailwindDirectives": true } }
 }
