@@ -1,6 +1,8 @@
+import type { PingResponse } from "@wayfare/domain";
 import type { FetchLike } from "@wayfare/providers";
 import { Hono } from "hono";
 import type { JWTVerifyGetKey } from "jose";
+import { firebaseAuth } from "./auth/middleware";
 import type { AuthUser } from "./auth/verifyIdToken";
 import type { Env } from "./env";
 import { apiError } from "./http/errors";
@@ -40,6 +42,17 @@ export function createApp(deps: AppDeps = {}): Hono<AppEnv> {
   app.use("*", rateLimit());
 
   app.get("/health", (c) => c.json({ ok: true, service: "api" }));
+
+  app.get("/ping", firebaseAuth, (c) => {
+    const user = c.get("user");
+    const body: PingResponse = {
+      ok: true,
+      uid: user.uid,
+      serverTime: c.get("deps").now().toISOString(),
+      firstSeen: false,
+    };
+    return c.json(body);
+  });
 
   app.notFound((c) => apiError(c, 404, "not_found", "Not found"));
   app.onError((err, c) => {
