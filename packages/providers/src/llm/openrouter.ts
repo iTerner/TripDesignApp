@@ -13,13 +13,23 @@ const ChatResponse = z.object({
   model: z.string().optional(),
 });
 
+/** X-Title is derived from the referer's hostname so no product name is hardcoded here. */
+function titleFor(referer: string): string {
+  try {
+    return new URL(referer).hostname || referer;
+  } catch {
+    return referer;
+  }
+}
+
 export class OpenRouterProvider implements LlmProvider {
   readonly id = "openrouter" as const;
 
   constructor(
     private readonly apiKey: string,
     private readonly fetchImpl: FetchLike = (i, init) => fetch(i, init),
-    private readonly referer = "https://tripdesignapp.web.app",
+    /** App origin for OpenRouter attribution (HTTP-Referer / X-Title). Omitted when absent. */
+    private readonly referer?: string,
   ) {}
 
   async complete(modelId: string, req: LlmRequest): Promise<LlmResult> {
@@ -40,14 +50,17 @@ export class OpenRouterProvider implements LlmProvider {
           }
         : {}),
     };
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      authorization: `Bearer ${this.apiKey}`,
+    };
+    if (this.referer) {
+      headers["http-referer"] = this.referer;
+      headers["x-title"] = titleFor(this.referer);
+    }
     const res = await this.fetchImpl("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${this.apiKey}`,
-        "http-referer": this.referer,
-        "x-title": "Wayfare",
-      },
+      headers,
       body: JSON.stringify(body),
     });
     if (!res.ok) {

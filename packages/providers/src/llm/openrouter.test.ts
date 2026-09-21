@@ -26,9 +26,19 @@ test("OpenAI-compatible request with bearer key, referer and json_schema respons
   const h = new Headers(f.calls[0]?.init?.headers);
   expect(h.get("authorization")).toBe("Bearer KEY");
   expect(h.get("http-referer")).toBe("https://app.test");
+  expect(h.get("x-title")).toBe("app.test");
   const sent = JSON.parse(String(f.calls[0]?.init?.body));
   expect(sent.messages[0]).toEqual({ role: "system", content: "sys" });
   expect(sent.response_format.type).toBe("json_schema");
+});
+
+test("without a referer no attribution headers are sent", async () => {
+  const f = fakeFetch(200, { choices: [{ message: { content: "ok" } }] });
+  await new OpenRouterProvider("KEY", f.fn).complete("m", { prompt: "x" });
+  const h = new Headers(f.calls[0]?.init?.headers);
+  expect(h.get("authorization")).toBe("Bearer KEY");
+  expect(h.has("http-referer")).toBe(false);
+  expect(h.has("x-title")).toBe(false);
 });
 
 test("daily free limit 429 → daily_quota", async () => {
