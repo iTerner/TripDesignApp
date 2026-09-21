@@ -1,0 +1,26 @@
+{
+  "name": "tripdesignapp",
+  "private": true,
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "test": "pnpm -r --parallel --filter \"!@wayfare/firebase-rules\" test",
+    "build": "pnpm -r build",
+    "secret-scan": "pnpm --filter @wayfare/tools secret-scan",
+    "prepare": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm secret-scan"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "simple-git-hooks": "^2.11.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
