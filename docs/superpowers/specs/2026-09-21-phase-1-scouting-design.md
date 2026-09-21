@@ -78,7 +78,7 @@ interface IntelligenceBackend {
 ```
 All request/response types are Zod schemas in `@wayfare/domain` (`scout/packets.ts`) and are shared verbatim by both backends and by the admin UI.
 
-**`gemini` backend** — prompts from `packages/domain/prompts/scout/*.md`; `ModelRouter` with the **Extract** chain; search via `SearchProvider`: **Tavily with `include_raw_content: true` as primary** (page bodies in one call), Gemini 2.5 Flash-Lite Google-Search grounding as fallback (URLs → fetch → readability). This is the reverse of the parent spec's plan-time order, for scouting only, because the scout needs page bodies. Bounded by `--budget` (default 80 LLM calls, 60 searches).
+**`gemini` backend** — prompts from `packages/domain/prompts/scout/*.md`; `ModelRouter` with the **Extract** chain; search via `SearchProvider`: **Tavily with `include_raw_content: true` as primary** (page bodies in one call), Gemini 2.5 Flash-Lite Google-Search grounding as fallback (URLs → fetch → readability). This is the reverse of the parent spec's plan-time order, for scouting only, because the scout needs page bodies. Bounded by `--budget` (default 80 LLM calls) and `scout.maxSearches` (default 60); the trends matrix is truncated to fit (§8.3: ≤ 2 searches per trends packet).
 
 **`agent` backend** — writes each call as `work/<dest>/packets/<type>-<n>.request.json` (system prompt, JSON schema, payload, `attempt`), waits for `<same>.response.json`, validates; invalid → `<same>.rejected.json` with per-item reasons; three rejections → the run pauses with a clear message. Provenance recorded on every place: `backend: "agent"`, `model: "cursor-agent"`, `packetIds[]`.
 
@@ -93,7 +93,7 @@ All request/response types are Zod schemas in `@wayfare/domain` (`scout/packets.
 ## 3. The Cursor agent backend
 
 ### 3.1 Owner experience
-In Cursor: *"Scout Tuscany"* (or `/scout-destination tuscany`). The agent reads the skill, runs `pnpm scout tuscany --backend agent`, and loops: read the oldest `*.request.json` → do the work → write `*.response.json` → re-run the CLI (validates, advances, emits next packets). Progress is visible via `--status` and in the admin Scouting tab. At the end the agent runs `--report` and pastes the summary. Recommended: a dedicated chat; a full Tuscany run is ≈ 1 areas + ~40 trends + ~50 enrich + ~12 stays packets ≈ 100 agent turns.
+In Cursor: *"Scout Tuscany"* (or `/scout-destination tuscany`). The agent reads the skill, runs `pnpm scout tuscany --backend agent`, and loops: read the oldest `*.request.json` → do the work → write `*.response.json` → re-run the CLI (validates, advances, emits next packets). Progress is visible via `--status` and in the admin Scouting tab. At the end the agent runs `--report` and pastes the summary. Recommended: a dedicated chat; a full Tuscany run is ≈ 1 areas + ~30 trends + ~50 enrich + ~12 stays packets ≈ 90–100 agent turns (see §8.3 for how the trends matrix is sized).
 
 ### 3.2 Packet protocol (`work/<dest>/packets/`)
 
@@ -184,7 +184,62 @@ All admin writes go through the Worker (`/admin/scout/*`, `/admin/places/*`, `/a
 
 ---
 
-## 8. Decisions log (Phase 1 brainstorm)
+## 8. Implementation clarifications (closes the gaps found in review)
+
+### 9.1 Geometry
+- **Destination geometry** is resolved once, when a destination is added to the queue: Nominatim `search?q=<name>&polygon_geojson=1&limit=1` filtered by kind (`region`/`country` → administrative boundary polygon + bbox; `city` → center + default radius 12 km, `city_plus_daytrips` later uses 90 min drive). Stored on `destinations/{slug}.geometry { bbox, polygonRef? , center, radiusKm? }`; polygons > 200 KB are simplified (`@turf/simplify`, tolerance 0.002) and stored in `destinations/{slug}/geometry/polygon`.
+- **"Inside the region"** = `@turf/boolean-point-in-polygon` against that polygon (bbox check first for speed). Places outside are rejected at stage 4 with reason `outside_region`.
+- **Per-area harvest bbox** = circle around the area center: `town` 3 km, `zone` 1.5 km, `countryside` 10 km (config `scout.areaRadiusKm`), clipped to the destination bbox. Areas from stage 1 must fall inside the destination polygon or they are dropped.
+
+### 9.2 Harvest (Overpass + Wikidata) — exact rules
+- Endpoint `https://overpass-api.de/api/interpreter`, fallback `https://overpass.kumi.systems/api/interpreter`; `[out:json][timeout:60]`; **sequential** queries, ≥ 1 s apart, identifying `User-Agent`; raw responses cached in `work/<dest>/02-overpass/<area>-<group>.json` (re-used on `--resume`).
+- Tag groups (each its own query per area): `tourism~"museum|attraction|viewpoint|gallery|artwork|theme_park|zoo|aquarium"`, `historic=*`, `amenity~"restaurant|cafe|ice_cream|bar|pub|marketplace|theatre|arts_centre"`, `shop~"bakery|pastry|confectionery|wine|deli|cheese|books|antiques|boutique|mall"`, `leisure~"park|garden|spa|beach_resort|nature_reserve"`, `natural~"beach|peak|spring|cave_entrance"`, `craft~"winery|distillery"`, `tourism~"hotel|guest_house|apartment|hostel|chalet"` (stays only). Nodes, ways and relations; `out center`.
+- Keep a candidate only if it has `name` **and** at least one of: `wikidata`, `website`, `opening_hours`, `cuisine`, `wikipedia`, or `tourism`/`historic` value in the attraction set. Drop `disused:*`, `abandoned:*`, `shop=vacant`.
+- **Wikidata** only via the OSM `wikidata=*` tag (or `wikipedia=*` → sitelink → QID): fetch label, description (en), image P18 (+ Commons licence/author via the file's `extmetadata`), sitelink count, official website P856. No free-text Wikidata search (too error-prone).
+- **Opening hours:** store the raw OSM `opening_hours` string in `openingHours` and `hoursStatus: "known" | "unknown"`; parsing/validation is Phase 2 (scheduler) using the `opening_hours` npm package.
+- **Candidate cap:** if a destination yields more than `scout.maxCandidates` (default 1,500) candidates, rank by (has wikidata, has website, has hours, tag richness) and enrich the top N; the rest are written with `status: "unenriched"` and picked up by later runs.
+
+### 9.3 Trend mining — themes, tiering, budget
+- **Themes** (config `scout.themes`, default): `food` · `dessert` · `cafe_breakfast` · `wine` · `viewpoint_photo` · `hidden_gems` · `culture` · `nightlife` · `shopping` · `family` · `nature_active`. Each theme has 2 query templates, e.g. dessert → `"best gelato {area} 2026"`, `"{area} pastry TikTok viral"`.
+- **Area tiers** from stage 1 (`tier: 1|2|3`, by Wikidata sitelinks of the area + candidate count): tier 1 areas get all themes, tier 2 get `food, dessert, hidden_gems, viewpoint_photo, culture`, tier 3 get `food, hidden_gems`.
+- **A trends packet = 1 area × 1 theme**, carrying its query templates. Under the `gemini` backend the CLI runs **at most 2 searches per packet** (Tavily `search_depth: "advanced"`, `include_raw_content: true`, `max_results: 8`), then one Extract-chain call over the concatenated page bodies (truncated to ~40k chars). The packet matrix is truncated in tier order until it fits `--budget` (LLM) and `scout.maxSearches` (default 60) → ≈ 30 packets for Tuscany. Under the `agent` backend there is no search cap; the agent decides how many pages to read.
+- **Quote verification (both backends):** the CLI fetches `sourceUrl` (rules in §7), extracts text with `@mozilla/readability` + `linkedom`, normalises whitespace/quotes/case, and checks `evidenceQuote` is a substring → `quoteVerified: true`. Failure keeps the evidence with `quoteVerified: false` and excludes it from `trendScore`. Pages that fail to fetch → `quoteVerified: false`, reason recorded.
+
+### 9.4 Identity, idempotency, re-runs
+- `placeId` is **assigned once** (at first insert, `sha1(normalizedName|geohash7)`) and thereafter found via the `resolvePlace()` ladder — a re-run never recomputes ids, so geohash cell boundaries cannot split a place.
+- **Evidence id** = `sha1(url|normalisedQuote)` → upsert; identical evidence is never duplicated; `fetchedAt`/`runId` are updated.
+- **Disappeared places:** a place absent from a new harvest is not deleted; the scout updates `lastSeenRunId` only for seen places and sets `notSeenSince` on the missing ones. Places with `notSeenSince` older than 2 runs and no non-OSM source are surfaced in the admin Places table filter "possibly closed"; only the admin hides.
+- **Run lock:** `destinations/{slug}.lock { runId, startedAt }`; a second run on the same slug refuses to start unless the lock is older than 2 h (`--force` overrides and records it).
+- **Stage outputs** in `work/<dest>/` are the resume points; `--from N` re-runs from stage N using the saved inputs.
+
+### 9.5 CLI execution model
+- The CLI is **step-wise and never blocks**: it performs all work it can, and when the `agent` backend has packets outstanding it writes them, prints the status board and **exits** with status `awaiting_packets` (exit code 3). The agent re-invokes it after answering; `--resume` is implied. Under `gemini` it runs to completion (or budget exhaustion → status `paused_budget`, exit code 4).
+- **Configuration** (`scout.*` magic numbers) is read from Firestore `config/current` if reachable, else `DEFAULT_CONFIG`; the admin Magic-numbers panel gains a "Scout" group.
+- Firestore writes: batched `commit` calls of ≤ 500 mutations, counted into `usageDaily/firestore_{date}.writes`; the pre-run estimate = candidates × 2 + evidence; abort if it exceeds 60 % of `(20000 − writes so far today)`.
+
+### 9.6 Admin access pattern and privacy
+- **Reads** for the admin tables are **direct Firestore SDK reads** from the browser, allowed by rules for the admin UID only (`request.auth.uid in ADMIN_UIDS`), paginated with `limit(50)` + cursors. **Writes** go through the Worker admin routes.
+- `places/{id}` remains publicly readable (needed by Phase 2/3); therefore **admin notes are private**: `adminOverrides[field].note` and hide reasons live in `places/{id}/private/admin` (admin-read, Worker-write only). `adminOverrides[field].value/by/at` may stay on the public doc (they contain no personal data beyond the admin UID → store `by: "admin"` not the UID).
+- `pendingMerges`, `scoutRuns`, `reviewSessions`, `destinations.lock` — admin-read only.
+- **Map display in Phase 1** (no MapLibre yet): each place shows coordinates and an "Open in OpenStreetMap" link (`https://www.openstreetmap.org/?mlat=&mlon=#map=17/…`); MapLibre embedding arrives in Phase 3.
+
+### 9.7 Repo and secrets
+- `.gitignore` currently ignores `.cursor/`; Phase 1 adds the exception `!.cursor/skills/` and `!.cursor/skills/**` so the skill is versioned. `work/` is ignored except `work/README.md`.
+- New Worker secret `GITHUB_DISPATCH_TOKEN` (fine-grained PAT: this repo only, `Actions: Read and write`) for the "Run with Gemini" button; new Actions secret set is unchanged (LLM keys + `FIREBASE_SERVICE_ACCOUNT` already exist).
+- New `.env` keys: none (scout reuses `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `FIREBASE_SERVICE_ACCOUNT`).
+
+### 9.8 Scoring formulas (initial constants, admin-tunable)
+- `completeness` = fraction of {hours, website, wikidata, image, cuisine-or-description} present (0–1).
+- `fameScore` = clamp(0, 100, `25·log10(1 + sitelinks)` + `8·min(sourcesCount, 5)` + `20·completeness`).
+- `trendScore` = clamp(0, 100, Σ over verified evidence of `platformWeight · recency`) where `platformWeight` = tiktok 1.5, instagram 1.2, reddit 1.1, blog 1.0, news 1.0, and `recency` = `max(0, 1 − monthsOld/24)`; scaled ×20 so three fresh TikTok mentions ≈ 90. Unverified quotes contribute 0.
+- Enrichment `dwellMin` sanity bands per category group (e.g. `food.dessert` 10–40, `culture.museum` 60–240) are enforced at validation (`dwell implausible for category`).
+
+### 9.9 Libraries (Node CLI)
+`commander` (CLI), `zod` (schemas, shared), `@turf/boolean-point-in-polygon` + `@turf/simplify`, `ngeohash`, `talisman` (Jaro–Winkler) or a local implementation with tests, `@mozilla/readability` + `linkedom`, `p-limit` (rate limiting), `undici` fetch with timeouts, `googleapis`-free Firestore REST via the Phase 0 `FirestoreClient` (shared into `packages/providers` or a new `packages/firestore`), `marked` for report rendering in the admin.
+
+---
+
+## 9. Decisions log (Phase 1 brainstorm)
 
 | Decision | Choice | Why |
 |---|---|---|
