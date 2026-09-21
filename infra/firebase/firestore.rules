@@ -3,10 +3,9 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // Spec §8 lock #2: admin UIDs are hardcoded here and deployed with the rules.
-    // Task 13 appends the owner's real UID; TEST_ADMIN_UID stays for emulator tests.
+    // Owner uid is listed beside TEST_ADMIN_UID, which stays for emulator tests.
     function isAdmin() {
-      // Task 13 replaces it with the real owner UID.
-      return signedIn() && request.auth.uid in ['TEST_ADMIN_UID'];
+      return signedIn() && request.auth.uid in ['TEST_ADMIN_UID', 'rzQZVb3x5zNdEMYbRyoOYakBE8D2'];
     }
 
     function signedIn() {

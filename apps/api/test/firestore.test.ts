@@ -63,6 +63,19 @@ test("incrementFields uses :commit with integer/double transforms", async () => 
   ]);
 });
 
+test("incrementFields quotes model ids so dots and colons stay one field", async () => {
+  const { calls, client } = recorder([{ status: 200, body: {} }]);
+  await client.incrementFields("usageDaily/google_2026-09-21", {
+    "google:gemini-3.8-flash.ok": 1,
+    total: 1,
+  });
+  const body = JSON.parse(String(calls[0]?.init?.body));
+  expect(body.writes[0].transform.fieldTransforms).toEqual([
+    { fieldPath: "`google:gemini-3.8-flash.ok`", increment: { integerValue: "1" } },
+    { fieldPath: "total", increment: { integerValue: "1" } },
+  ]);
+});
+
 test("non-2xx (other than 404 on GET) throws with the status and not the upstream body", async () => {
   const { client } = recorder([
     { status: 403, body: { error: { message: "user@example.com bearer leaked" } } },

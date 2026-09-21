@@ -2,6 +2,7 @@
   "app": { "name": "Wayfare", "tagline": "Plan a trip you'll actually take." },
   "auth": {
     "signIn": "Sign in with Google",
+    "failed": "Google sign-in did not finish. Try again.",
     "signOut": "Sign out",
     "signedInAs": "Signed in as {{email}}"
   },

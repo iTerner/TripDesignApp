@@ -1,4 +1,11 @@
 import type { FetchLike } from "@wayfare/providers";
+
+/** Firestore rejects unquoted paths that contain `:`, `.`, or `/` (model ids). Quote the whole name so `.` stays inside the field. */
+function quoteFieldPath(path: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(path)) return path;
+  return `\`${path.replace(/\\/g, "\\\\").replace(/`/g, "\\`")}\``;
+}
+
 import { type FirestoreValue, fromFirestoreDocument, toFirestoreValue } from "./values";
 
 export interface FirestoreClientOptions {
@@ -67,7 +74,7 @@ export class FirestoreClient {
   /** Atomic numeric increments via :commit; creates the document if it does not exist. */
   async incrementFields(path: string, increments: Record<string, number>): Promise<void> {
     const fieldTransforms = Object.entries(increments).map(([fieldPath, n]) => ({
-      fieldPath,
+      fieldPath: quoteFieldPath(fieldPath),
       increment: Number.isInteger(n) ? { integerValue: String(n) } : { doubleValue: n },
     }));
     await this.call(`${this.apiRoot}/${this.docRoot}:commit`, {

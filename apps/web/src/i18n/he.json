@@ -2,6 +2,7 @@
   "app": { "name": "Wayfare", "tagline": "מתכננים טיול שבאמת תעשו." },
   "auth": {
     "signIn": "התחברות עם Google",
+    "failed": "ההתחברות עם Google לא הושלמה. נסו שוב.",
     "signOut": "התנתקות",
     "signedInAs": "מחובר/ת בתור {{email}}"
   },
