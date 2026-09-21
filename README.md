@@ -1,4 +1,4 @@
-﻿# TripDesignApp (working name: Wayfare)
+# TripDesignApp (working name: Wayfare)
 
 An AI trip planner that turns a short, structured brief (destination, dates and flights, party, mobility and car-rental consent, pace, budget, vacation-type mix, interests, must-visits, and three guided free-text prompts) into a day-by-day itinerary with a map: ordered stops, travel legs, one approximate time per stop, where to sleep each night, links, and exports (PDF, Google Docs, share link). Planning is performed by free-tier LLMs choosing from a verified menu of real places that is built offline, so the model selects rather than invents. Everything runs at zero cost with no payment card anywhere.
 
@@ -184,3 +184,27 @@ From [spec §15](docs/superpowers/specs/2026-09-20-trip-planner-design.md#15-ope
   - [§13 Legal team and governance](docs/superpowers/specs/2026-09-20-trip-planner-design.md#13-legal-team--governance)
   - [§15 Open items](docs/superpowers/specs/2026-09-20-trip-planner-design.md#15-open-items-not-blocking-phase-0)
 - [Screen mockups (Cursor Canvas)](docs/superpowers/mockups/trip-planner-screens.canvas.tsx)
+
+## Development
+
+Prerequisites: Node 22, pnpm 10, Java 21 (Firestore emulator), Firebase Spark project `tripdesignai`, a Cloudflare account, Gemini and OpenRouter free keys — see `docs/superpowers/plans/2026-09-20-phase-0-foundations.md`, Task 0.
+
+| Surface | URL |
+|---|---|
+| Hosting | https://tripdesignai.web.app |
+| Worker | https://wayfare-api.ido-terner.workers.dev |
+| Local API | http://127.0.0.1:8787 |
+| Local web | http://localhost:5173 via `dev.bat` (once Task 12 has created `apps/web`) |
+
+```bash
+pnpm install
+pnpm lint && pnpm typecheck && pnpm test      # unit tests: domain, providers, api, web
+pnpm --filter @wayfare/firebase-rules test   # Firestore rules against the emulator
+pnpm --filter @wayfare/api dev               # Worker on http://127.0.0.1:8787 (needs apps/api/.dev.vars)
+dev.bat                                      # SPA on http://localhost:5173 (needs apps/web from Task 12)
+```
+
+Secrets live only in `apps/api/.dev.vars` locally and as Cloudflare Worker secrets on `wayfare-api` in production. Admin access is the UID list in `infra/firebase/firestore.rules` plus the `ADMIN_UIDS` Worker secret. Until Task 13, `isAdmin()` still lists only the placeholder `TEST_ADMIN_UID`.
+
+Key rotation, adding or removing an admin, and quota exhaustion: [docs/RUNBOOK.md](docs/RUNBOOK.md).
+
