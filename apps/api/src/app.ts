@@ -9,6 +9,7 @@ import { apiError } from "./http/errors";
 import { lockedCors } from "./middleware/cors";
 import { rateLimit } from "./middleware/rateLimit";
 import { securityHeaders } from "./middleware/securityHeaders";
+import { adminRoutes } from "./routes/admin";
 
 export interface AppDeps {
   /** Injected in tests; defaults to Google's Firebase JWKS. */
@@ -53,6 +54,8 @@ export function createApp(deps: AppDeps = {}): Hono<AppEnv> {
     };
     return c.json(body);
   });
+
+  app.route("/admin", adminRoutes);
 
   app.notFound((c) => apiError(c, 404, "not_found", "Not found"));
   app.onError((err, c) => {
