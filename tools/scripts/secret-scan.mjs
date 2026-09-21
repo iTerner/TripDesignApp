@@ -13,18 +13,25 @@ const PATTERNS = [
   [/cfut_[0-9A-Za-z_-]{30,}/, "Cloudflare API token"],
 ];
 const ALLOW = [
-  /\.example$/,
   /secret-scan\.mjs$/,
   /\/test\/helpers\/testPem\.ts$/,
+  /\\test\\helpers\\testPem\.ts$/,
   /pnpm-lock\.yaml$/,
 ];
 
-const gitleaks = spawnSync("gitleaks", ["version"], { stdio: "ignore" });
-if (gitleaks.status === 0) {
-  const r = spawnSync("gitleaks", ["protect", "--staged", "--redact", "--no-banner"], {
-    stdio: "inherit",
-  });
-  process.exit(r.status ?? 1);
+// gitleaks is an extra staged-diff check. It must not replace the project patterns,
+// and `gitleaks protect --staged` ignores explicit paths, so only run it for the
+// no-arg pre-commit mode. A gitleaks failure still aborts the commit.
+if (process.argv.length <= 2) {
+  // One shell string so Node does not concatenate an args array into the shell.
+  const gitleaks = spawnSync("gitleaks version", { stdio: "ignore", shell: true });
+  if (gitleaks.status === 0) {
+    const r = spawnSync("gitleaks protect --staged --redact --no-banner", {
+      stdio: "inherit",
+      shell: true,
+    });
+    if ((r.status ?? 1) !== 0) process.exit(r.status ?? 1);
+  }
 }
 
 // `git diff --name-only` paths are relative to the repo root, but the hook runs this script

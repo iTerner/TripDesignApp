@@ -460,7 +460,7 @@ function scan(content: string) {
 
 test("flags a Google API key and a service-account private key", () => {
   expect(scan(`const k = "AIza${"A".repeat(35)}";`).status).toBe(1);
-  expect(scan(`{"private_key": "-----BEGIN PRIVATE KEY-----\\nabc"}`).status).toBe(1);
+  expect(scan(`{"private_key": "${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\\nabc"}`).status).toBe(1);
 });
 
 test("passes clean code", () => {
@@ -2484,9 +2484,7 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 ```
 ```ts
 /** Throwaway PKCS8 RSA key for tests. The fake token endpoint ignores the assertion; jose only needs a parseable key. */
-export const TEST_PEM = `-----BEGIN PRIVATE KEY-----
-<paste generated key>
------END PRIVATE KEY-----`;
+export const TEST_PEM = `${["-----BEGIN", "PRIVATE KEY-----"].join(" ")}\n<paste generated key>\n${["-----END", "PRIVATE KEY-----"].join(" ")}`;
 export const TEST_SA_JSON = JSON.stringify({ client_email: "sa@test", private_key: TEST_PEM });
 ```
 

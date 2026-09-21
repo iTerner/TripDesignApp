@@ -31,7 +31,8 @@ export class FirestoreClient {
       },
     });
     if (!res.ok && !(allow404 && res.status === 404)) {
-      throw new Error(`Firestore HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      await res.body?.cancel();
+      throw new Error(`Firestore HTTP ${res.status}`);
     }
     return res;
   }

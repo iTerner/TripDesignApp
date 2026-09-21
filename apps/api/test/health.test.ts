@@ -78,14 +78,25 @@ test("unknown route returns JSON 404", async () => {
 });
 
 test("an unexpected exception returns a generic 500 with no stack trace or message leakage", async () => {
-  const boom = createApp();
-  boom.get("/boom", () => {
-    throw new Error("secret internal detail: db password is hunter2");
-  });
-  const res = await boom.request("/boom", {}, env);
-  expect(res.status).toBe(500);
-  const text = await res.text();
-  expect(JSON.parse(text)).toEqual({ error: "internal", message: "Internal error" });
-  expect(text).not.toMatch(/hunter2|at .*\.ts:\d+|Error:/);
-  expectSecurityHeaders(res);
+  const logged: string[] = [];
+  const orig = console.error;
+  console.error = (msg?: unknown) => {
+    logged.push(String(msg));
+  };
+  try {
+    const boom = createApp();
+    boom.get("/boom", () => {
+      throw new Error("secret internal detail: db password is hunter2");
+    });
+    const res = await boom.request("/boom", {}, env);
+    expect(res.status).toBe(500);
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ error: "internal", message: "Internal error" });
+    expect(text).not.toMatch(/hunter2|at .*\.ts:\d+|Error:/);
+    expectSecurityHeaders(res);
+    expect(logged.join("\n")).toContain("/boom");
+    expect(logged.join("\n")).not.toContain("hunter2");
+  } finally {
+    console.error = orig;
+  }
 });

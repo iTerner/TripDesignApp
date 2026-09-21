@@ -63,7 +63,9 @@ test("incrementFields uses :commit with integer/double transforms", async () => 
   ]);
 });
 
-test("non-2xx (other than 404 on GET) throws with the status", async () => {
-  const { client } = recorder([{ status: 403, body: { error: { message: "denied" } } }]);
-  await expect(client.getDocument("users/u1")).rejects.toThrow(/403/);
+test("non-2xx (other than 404 on GET) throws with the status and not the upstream body", async () => {
+  const { client } = recorder([
+    { status: 403, body: { error: { message: "user@example.com bearer leaked" } } },
+  ]);
+  await expect(client.getDocument("users/u1")).rejects.toThrow("Firestore HTTP 403");
 });

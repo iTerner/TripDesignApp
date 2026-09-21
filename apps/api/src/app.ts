@@ -48,7 +48,7 @@ export function createApp(deps: AppDeps = {}): Hono<AppEnv> {
 
   app.notFound((c) => apiError(c, 404, "not_found", "Not found"));
   app.onError((err, c) => {
-    console.error(JSON.stringify({ level: "error", path: c.req.path, message: err.message }));
+    console.error(JSON.stringify({ level: "error", path: c.req.path, name: err.name }));
     return apiError(c, 500, "internal", "Internal error");
   });
   return app;
