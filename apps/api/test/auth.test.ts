@@ -1,22 +1,33 @@
 import { env } from "cloudflare:test";
 import { createApp } from "../src/app";
+import { fakeFirestore } from "./helpers/fakeFirestore";
+import { TEST_SA_JSON } from "./helpers/testPem";
 import { makeTestJwks } from "./helpers/tokens";
 
 const NOW = new Date("2026-09-20T12:00:00Z");
+const withSa = { ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON };
+
+function testApp(jwks: Awaited<ReturnType<typeof makeTestJwks>>) {
+  return createApp({
+    jwks: jwks.getKey,
+    now: () => NOW,
+    fetchImpl: fakeFirestore().fetchImpl,
+  });
+}
 
 test("no token → 401 unauthorized", async () => {
   const jwks = await makeTestJwks();
-  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
-  const res = await app.request("/ping", {}, env);
+  const app = testApp(jwks);
+  const res = await app.request("/ping", {}, withSa);
   expect(res.status).toBe(401);
   expect(await res.json()).toMatchObject({ error: "unauthorized" });
 });
 
 test("valid token → 200 with uid and serverTime", async () => {
   const jwks = await makeTestJwks();
-  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  const app = testApp(jwks);
   const token = await jwks.sign({ sub: "abc123" });
-  const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
+  const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, withSa);
   expect(res.status).toBe(200);
   expect(await res.json()).toMatchObject({
     ok: true,
@@ -63,21 +74,21 @@ test.each([
   ],
 ] as const)("rejects a token with %s → 401", async (_label, make) => {
   const jwks = await makeTestJwks();
-  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  const app = testApp(jwks);
   const token = await make(jwks);
-  const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
+  const res = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, withSa);
   expect(res.status).toBe(401);
   expect(await res.json()).toMatchObject({ error: "unauthorized" });
 });
 
 test("malformed Authorization headers → 401 (no scheme, wrong scheme, garbage token)", async () => {
   const jwks = await makeTestJwks();
-  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  const app = testApp(jwks);
   for (const authorization of ["", "Basic abc", "Bearer", "Bearer not.a.jwt", "Token x.y.z"]) {
     const res = await app.request(
       "/ping",
       { headers: authorization ? { authorization } : {} },
-      env,
+      withSa,
     );
     expect(res.status, authorization).toBe(401);
   }
@@ -85,14 +96,18 @@ test("malformed Authorization headers → 401 (no scheme, wrong scheme, garbage 
 
 test("emulator mode: unsigned Auth-emulator tokens are accepted ONLY when FIREBASE_AUTH_EMULATOR_HOST is set", async () => {
   const jwks = await makeTestJwks();
-  const app = createApp({ jwks: jwks.getKey, now: () => NOW });
+  const app = testApp(jwks);
   const token = await jwks.unsecured({ sub: "emu-user" });
-  const prod = await app.request("/ping", { headers: { authorization: `Bearer ${token}` } }, env);
+  const prod = await app.request(
+    "/ping",
+    { headers: { authorization: `Bearer ${token}` } },
+    withSa,
+  );
   expect(prod.status).toBe(401);
   const dev = await app.request(
     "/ping",
     { headers: { authorization: `Bearer ${token}` } },
-    { ...env, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" },
+    { ...withSa, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" },
   );
   expect(dev.status).toBe(200);
   expect(await dev.json()).toMatchObject({ uid: "emu-user" });
@@ -100,7 +115,7 @@ test("emulator mode: unsigned Auth-emulator tokens are accepted ONLY when FIREBA
   const badAud = await app.request(
     "/ping",
     { headers: { authorization: `Bearer ${await jwks.unsecured({ aud: "other" })}` } },
-    { ...env, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" },
+    { ...withSa, FIREBASE_AUTH_EMULATOR_HOST: "127.0.0.1:9099" },
   );
   expect(badAud.status).toBe(401);
 });

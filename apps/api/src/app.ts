@@ -1,8 +1,6 @@
-import type { PingResponse } from "@wayfare/domain";
 import type { FetchLike } from "@wayfare/providers";
 import { Hono } from "hono";
 import type { JWTVerifyGetKey } from "jose";
-import { firebaseAuth } from "./auth/middleware";
 import type { AuthUser } from "./auth/verifyIdToken";
 import type { Env } from "./env";
 import { apiError } from "./http/errors";
@@ -10,6 +8,7 @@ import { lockedCors } from "./middleware/cors";
 import { rateLimit } from "./middleware/rateLimit";
 import { securityHeaders } from "./middleware/securityHeaders";
 import { adminRoutes } from "./routes/admin";
+import { pingRoutes } from "./routes/ping";
 
 export interface AppDeps {
   /** Injected in tests; defaults to Google's Firebase JWKS. */
@@ -44,17 +43,7 @@ export function createApp(deps: AppDeps = {}): Hono<AppEnv> {
 
   app.get("/health", (c) => c.json({ ok: true, service: "api" }));
 
-  app.get("/ping", firebaseAuth, (c) => {
-    const user = c.get("user");
-    const body: PingResponse = {
-      ok: true,
-      uid: user.uid,
-      serverTime: c.get("deps").now().toISOString(),
-      firstSeen: false,
-    };
-    return c.json(body);
-  });
-
+  app.route("/ping", pingRoutes);
   app.route("/admin", adminRoutes);
 
   app.notFound((c) => apiError(c, 404, "not_found", "Not found"));
