@@ -203,8 +203,8 @@ Every change from steps 7–9 is recorded as `{round, change, why}` and shown li
 
 | Chain | Used by | Order (snapshot Sep 2026; verified against provider catalogues) |
 |---|---|---|
-| **Best** | steps 2, 5, 7, 9, 10 | Gemini 3.8 Flash → 3.7 Flash → 3.6 Flash → 3.5 Flash → 2.5 Pro → 2.5 Flash → Gemma 4 31B → OR `nvidia/nemotron-3-ultra-550b:free` → OR `nex-agi/nex-n2.5-pro:free` → OR `qwen/qwen3.8-27b:free` → OR `google/gemma-4-31b-it:free` → `openrouter/free` |
-| **Extract** | scouting stages 3, 5; lint repair | Gemini 3.5 Flash-Lite → 3.1 Flash-Lite → 2.5 Flash-Lite → 2.0 Flash → Gemma 4 26B → OR `nvidia/nemotron-3-super-120b:free` → OR `inclusionai/ling-3.0-flash:free` → OR `nex-agi/nex-n2.5-mini:free` → `openrouter/free` |
+| **Best** | steps 2, 5, 7, 9, 10 | Gemini 3.8 Flash → 3.7 Flash → 3.6 Flash → 3.5 Flash → 2.5 Pro → 2.5 Flash → Gemma 4 31B → OR `nvidia/nemotron-3-ultra-550b-a55b:free` → OR `nex-agi/nex-n2.5-pro:free` → OR `qwen/qwen3.8-27b:free` → OR `google/gemma-4-31b-it:free` → `openrouter/free` |
+| **Extract** | scouting stages 3, 5; lint repair | Gemini 3.5 Flash-Lite → 3.1 Flash-Lite → 2.5 Flash-Lite → 2.0 Flash → Gemma 4 26B → OR `nvidia/nemotron-3-super-120b-a12b:free` → OR `inclusionai/ling-3.0-flash-fin:free` → OR `nex-agi/nex-n2.5-mini:free` → `openrouter/free` |
 | **Search** | scouting stage 3, gap search | Gemini 2.5 Flash-Lite + Google Search grounding (500/day; **retriever only** — the Best chain reads the pages) → Tavily (1,000/month) |
 
 Facts that shaped this (verified 2026-09-20): Gemini 3.1 Pro Preview has **no free tier**; Google Search grounding is **not available** on the free tier for Gemini 3.x, but is free (500 RPD) on 2.5 Flash / 2.5 Flash-Lite; Google no longer publishes per-model free RPDs (community-observed: top Flash ≈ 20/day, Flash-Lite ≈ 500/day); OpenRouter `:free` = 50 req/day shared pool (1,000/day after a one-time $10 credit purchase — optional lever, not assumed), 20 rpm. Models lacking native JSON-schema output get prompt-enforced JSON + validator/repair.
