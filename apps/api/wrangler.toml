@@ -1,0 +1,15 @@
+name = "wayfare-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FIREBASE_PROJECT_ID = "tripdesignai"
+ALLOWED_ORIGIN = "https://tripdesignai.web.app"
+
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "206715a2c19b47cfa17c319cde06d977"
+
+[observability]
+enabled = true
