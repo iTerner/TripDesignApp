@@ -19,6 +19,12 @@ test("flags a Google API key and a service-account private key", () => {
   expect(scan(`{"private_key": "${PEM_HEADER}\\nabc"}`).status).toBe(1);
 });
 
+test("flags a Cloudflare API token", () => {
+  // Assembled at runtime so this test file itself does not trip the pre-commit scanner.
+  const token = `cfut_${"x".repeat(40)}`;
+  expect(scan(`const t = "${token}";`).status).toBe(1);
+});
+
 test("passes clean code", () => {
   expect(scan(`export const x = 1;`).status).toBe(0);
 });

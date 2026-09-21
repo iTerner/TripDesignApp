@@ -10,6 +10,7 @@ const PATTERNS = [
   [/"private_key"\s*:\s*"-----BEGIN/, "Service-account private key"],
   [/-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/, "Private key block"],
   [/ghp_[0-9A-Za-z]{36}/, "GitHub token"],
+  [/cfut_[0-9A-Za-z_-]{30,}/, "Cloudflare API token"],
 ];
 const ALLOW = [
   /\.example$/,
