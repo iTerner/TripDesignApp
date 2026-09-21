@@ -1,0 +1,32 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [master, phase-0]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --filter @wayfare/domain --filter @wayfare/providers --filter @wayfare/api --filter @wayfare/web --filter @wayfare/tools test
+      - run: pnpm --filter @wayfare/firebase-rules test
+      - run: pnpm audit --audit-level high
+      - run: pnpm --filter @wayfare/web build
+        env:
+          VITE_FIREBASE_API_KEY: ci
+          VITE_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: ci
+          VITE_FIREBASE_APP_ID: ci
+          VITE_API_URL: https://ci.invalid
+      - name: Bundle secret scan (after build)
+        run: pnpm --filter @wayfare/tools exec vitest run test/bundleSecrets.test.ts
+      - name: Repo secret scan (all tracked files)
+        run: git ls-files | xargs node tools/scripts/secret-scan.mjs
