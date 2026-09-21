@@ -1,7 +1,8 @@
 {
   "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
   "hosting": {
-    "public": "../../apps/web/dist",
+    "public": "public",
+    "predeploy": ["node copy-hosting.mjs"],
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }],
     "headers": [

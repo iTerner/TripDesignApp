@@ -13,6 +13,7 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 .firebase/
+infra/firebase/public/
 coverage/
 *.tsbuildinfo
 .cursor/
