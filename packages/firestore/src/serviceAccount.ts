@@ -17,14 +17,19 @@ export function parseServiceAccount(raw: string): ServiceAccount {
   return { client_email: obj.client_email, private_key: obj.private_key };
 }
 
-/** Mints (and KV-caches) an OAuth2 access token for the Firestore REST API. One KV write per ~55 minutes. */
-export async function getAccessToken(
+export interface AccessTokenCache {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+}
+
+/** Mints an OAuth2 access token for the Firestore REST API. The scout CLI passes a process-local cache. */
+export async function getAccessTokenCached(
   sa: ServiceAccount,
-  kv: KVNamespace,
+  cache: AccessTokenCache,
   fetchImpl: FetchLike,
   now: Date,
 ): Promise<string> {
-  const cached = await kv.get(KV_KEY);
+  const cached = await cache.get(KV_KEY);
   if (cached) return cached;
   const key = await importPKCS8(sa.private_key, "RS256");
   const iat = Math.floor(now.getTime() / 1000);
@@ -46,8 +51,18 @@ export async function getAccessToken(
   });
   if (!res.ok) throw new Error(`Service account token exchange failed: HTTP ${res.status}`);
   const json = (await res.json()) as { access_token: string; expires_in: number };
-  await kv.put(KV_KEY, json.access_token, {
+  await cache.put(KV_KEY, json.access_token, {
     expirationTtl: Math.min(3300, Math.max(60, json.expires_in - 300)),
   });
   return json.access_token;
+}
+
+/** Mints (and KV-caches) an OAuth2 access token for the Firestore REST API. One KV write per ~55 minutes. */
+export async function getAccessToken(
+  sa: ServiceAccount,
+  kv: AccessTokenCache,
+  fetchImpl: FetchLike,
+  now: Date,
+): Promise<string> {
+  return getAccessTokenCached(sa, kv, fetchImpl, now);
 }

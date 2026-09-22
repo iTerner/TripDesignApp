@@ -13,6 +13,7 @@
     "@turf/boolean-point-in-polygon": "^7.4.0",
     "@turf/simplify": "^7.4.0",
     "@wayfare/domain": "workspace:*",
+    "@wayfare/firestore": "workspace:*",
     "@wayfare/providers": "workspace:*",
     "commander": "^13.1.0",
     "zod": "^4.1.0"

@@ -75,6 +75,9 @@ importers:
       '@wayfare/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@wayfare/firestore':
+        specifier: workspace:*
+        version: link:../../packages/firestore
       '@wayfare/providers':
         specifier: workspace:*
         version: link:../../packages/providers

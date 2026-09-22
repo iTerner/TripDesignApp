@@ -23,8 +23,7 @@ jobs:
       - name: Refuse agent backend
         if: inputs.backend != 'gemini'
         run: exit 1
-      # Part B removes --dry-run once stage 7 writes Firestore
-      - run: pnpm scout ${{ inputs.destinations }} --backend gemini --dry-run
+      - run: pnpm scout ${{ inputs.destinations }} --backend gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

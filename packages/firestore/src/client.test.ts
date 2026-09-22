@@ -76,6 +76,80 @@ test("incrementFields quotes model ids so dots and colons stay one field", async
   ]);
 });
 
+test("commitUpdates sends an update mask and refuses more than 500 writes before any request", async () => {
+  const { calls, client } = recorder([{ status: 200, body: {} }]);
+  await client.commitUpdates([
+    {
+      path: "destinations/tuscany",
+      fields: { status: "ready" },
+      updateMask: ["status", "lock"],
+    },
+  ]);
+  const body = JSON.parse(String(calls[0]?.init?.body));
+  expect(calls[0]?.url).toContain(":commit");
+  expect(body.writes[0].update.name).toBe(
+    "projects/p/databases/(default)/documents/destinations/tuscany",
+  );
+  expect(body.writes[0].updateMask.fieldPaths).toEqual(["status", "lock"]);
+  expect(body.writes[0].update.fields.lock).toBeUndefined();
+  expect(body.writes[0].update.fields.status).toEqual({ stringValue: "ready" });
+
+  const blocked = recorder([]);
+  const writes = Array.from({ length: 501 }, (_, index) => ({
+    path: `places/p${index}`,
+    fields: { name: "x" },
+  }));
+  await expect(blocked.client.commitUpdates(writes)).rejects.toThrow(/500/);
+  expect(blocked.calls).toHaveLength(0);
+});
+
+test("queryEquals decodes matches and follows an exclusive name cursor", async () => {
+  const docs = [
+    { path: "places/a", destSlug: "tuscany", name: "A" },
+    { path: "places/b", destSlug: "tuscany", name: "B" },
+  ];
+  const fetchImpl = async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as {
+      structuredQuery: {
+        limit: number;
+        startAt?: { before: boolean; values: Array<{ referenceValue: string }> };
+      };
+    };
+    const ordered = [...docs].sort((left, right) => left.path.localeCompare(right.path));
+    const cursor = body.structuredQuery.startAt;
+    let start = 0;
+    if (cursor?.before === false) {
+      const reference = cursor.values[0]?.referenceValue ?? "";
+      const index = ordered.findIndex((doc) => reference.endsWith(doc.path));
+      start = index >= 0 ? index + 1 : 0;
+    }
+    const page = ordered.slice(start, start + body.structuredQuery.limit);
+    return new Response(
+      JSON.stringify(
+        page.map((doc) => ({
+          document: {
+            name: `projects/p/databases/(default)/documents/${doc.path}`,
+            fields: {
+              destSlug: { stringValue: doc.destSlug },
+              name: { stringValue: doc.name },
+            },
+          },
+        })),
+      ),
+      { status: 200 },
+    );
+  };
+  const client = new FirestoreClient({
+    projectId: "p",
+    tokenProvider: async () => "token",
+    fetchImpl,
+  });
+  await expect(client.queryEquals("places", "destSlug", "tuscany", 1)).resolves.toEqual([
+    { path: "places/a", data: { destSlug: "tuscany", name: "A" } },
+    { path: "places/b", data: { destSlug: "tuscany", name: "B" } },
+  ]);
+});
+
 test("non-2xx (other than 404 on GET) throws with the status and not the upstream body", async () => {
   const { client } = recorder([
     { status: 403, body: { error: { message: "user@example.com bearer leaked" } } },

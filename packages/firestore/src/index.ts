@@ -1,5 +1,11 @@
 export { FirestoreClient, type FirestoreClientOptions } from "./client";
-export { getAccessToken, parseServiceAccount, type ServiceAccount } from "./serviceAccount";
+export {
+  type AccessTokenCache,
+  getAccessToken,
+  getAccessTokenCached,
+  parseServiceAccount,
+  type ServiceAccount,
+} from "./serviceAccount";
 export {
   type FirestoreValue,
   fromFirestoreDocument,

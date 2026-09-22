@@ -182,7 +182,7 @@ function enrichmentFields(enrichment: EnrichedPlace | undefined): Record<string,
 
 function toEvidence(item: EvidenceInput, input: DryWriteInput): Evidence {
   return EvidenceSchema.parse({
-    id: evidenceId(item.url, item.quote),
+    id: evidenceDocId(item.url, item.quote),
     placeId: item.placeId,
     url: item.url,
     platform: item.platform,
@@ -206,7 +206,7 @@ function provenance(id: IntelligenceBackend["id"]): {
   return { backend: "agent" };
 }
 
-function evidenceId(url: string, quote: string): string {
+export function evidenceDocId(url: string, quote: string): string {
   return createHash("sha1")
     .update(`${url}|${normalisedQuote(quote)}`)
     .digest("hex");

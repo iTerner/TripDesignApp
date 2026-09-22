@@ -83,4 +83,109 @@ export class FirestoreClient {
       }),
     });
   }
+
+  /** One Firestore commit. More than 500 writes is rejected before the request. */
+  async commitUpdates(
+    writes: ReadonlyArray<{
+      path: string;
+      fields: Record<string, unknown>;
+      updateMask?: readonly string[];
+    }>,
+  ): Promise<void> {
+    if (writes.length === 0) return;
+    if (writes.length > 500) throw new Error("Firestore commit exceeds 500 writes");
+    await this.call(`${this.apiRoot}/${this.docRoot}:commit`, {
+      method: "POST",
+      body: JSON.stringify({
+        writes: writes.map((write) => {
+          const encoded = toFirestoreValue(write.fields) as {
+            mapValue: { fields: Record<string, FirestoreValue> };
+          };
+          return {
+            update: {
+              name: `${this.docRoot}/${write.path}`,
+              fields: encoded.mapValue.fields,
+            },
+            updateMask: { fieldPaths: [...(write.updateMask ?? Object.keys(write.fields))] },
+          };
+        }),
+      }),
+    });
+  }
+
+  /** Equality query on one collection. Pages of `pageSize` follow the document-name cursor. */
+  async queryEquals(
+    collectionId: string,
+    fieldPath: string,
+    value: string,
+    pageSize = 300,
+  ): Promise<Array<{ path: string; data: Record<string, unknown> }>> {
+    const out: Array<{ path: string; data: Record<string, unknown> }> = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const structuredQuery: Record<string, unknown> = {
+        from: [{ collectionId }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath },
+            op: "EQUAL",
+            value: { stringValue: value },
+          },
+        },
+        orderBy: [{ field: { fieldPath: "__name__" }, direction: "ASCENDING" }],
+        limit: pageSize,
+      };
+      if (cursor !== undefined) {
+        structuredQuery.startAt = { values: [{ referenceValue: cursor }], before: false };
+      }
+      const res = await this.call(`${this.apiRoot}/${this.docRoot}:runQuery`, {
+        method: "POST",
+        body: JSON.stringify({ structuredQuery }),
+      });
+      const rows = parseQueryRows(await res.text());
+      let count = 0;
+      for (const row of rows) {
+        const document = queryDocument(row);
+        if (document === undefined) continue;
+        const path = document.name.split("/documents/")[1];
+        if (path === undefined || seen.has(path)) return out;
+        seen.add(path);
+        count += 1;
+        cursor = document.name;
+        out.push({ path, data: fromFirestoreDocument({ fields: document.fields }) });
+      }
+      if (count < pageSize) return out;
+    }
+    throw new Error("Firestore query exceeded 20 pages");
+  }
+}
+
+function parseQueryRows(text: string): unknown[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return [];
+  if (trimmed.startsWith("[")) {
+    const parsed: unknown = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed : [];
+  }
+  const rows: unknown[] = [];
+  for (const line of trimmed.split("\n")) {
+    const item = line.trim();
+    if (item.length === 0) continue;
+    rows.push(JSON.parse(item) as unknown);
+  }
+  return rows;
+}
+
+function queryDocument(
+  row: unknown,
+): { name: string; fields: Record<string, FirestoreValue> } | undefined {
+  if (typeof row !== "object" || row === null || !("document" in row)) return undefined;
+  const document = (row as { document?: unknown }).document;
+  if (typeof document !== "object" || document === null) return undefined;
+  const name = (document as { name?: unknown }).name;
+  if (typeof name !== "string") return undefined;
+  const fields = (document as { fields?: unknown }).fields ?? {};
+  if (typeof fields !== "object" || fields === null) return undefined;
+  return { name, fields: fields as Record<string, FirestoreValue> };
 }
