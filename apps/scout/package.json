@@ -10,12 +10,15 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
+    "@turf/boolean-point-in-polygon": "^7.4.0",
+    "@turf/simplify": "^7.4.0",
     "@wayfare/domain": "workspace:*",
     "@wayfare/providers": "workspace:*",
     "commander": "^13.1.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^22.0.0",
     "tsx": "^4.20.3",
     "typescript": "^5.9.0",
