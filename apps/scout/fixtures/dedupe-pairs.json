@@ -1,0 +1,466 @@
+[
+  {
+    "left": {
+      "name": "Alpha Place",
+      "lat": 43.7879864321,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "osmId": "node/100"
+    },
+    "right": {
+      "name": "Beta Place",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "osmId": "node/100"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Gamma Hall",
+      "lat": 43.8149660803,
+      "lng": 11.25,
+      "category": "culture.museum",
+      "wikidataId": "Q100"
+    },
+    "right": {
+      "name": "Delta Hall",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum",
+      "wikidataId": "Q100"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Website Left",
+      "lat": 43.7969796482,
+      "lng": 11.25,
+      "category": "food.cafe",
+      "website": "https://www.x.it/menu"
+    },
+    "right": {
+      "name": "Website Right",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.cafe",
+      "website": "http://x.it"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Y Left",
+      "lat": 43.8419457285,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "website": "WWW.Y.IT"
+    },
+    "right": {
+      "name": "Y Right",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "website": "https://www.y.it/a"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Trattoria Sostanza",
+      "lat": 43.7703597286,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Sostanza",
+      "lat": 43.7879864321,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Dwayne",
+      "lat": 43.7708993216,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Duane",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "ambiguous"
+  },
+  {
+    "left": {
+      "name": "Museo Accademia",
+      "lat": 43.7708993216,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "right": {
+      "name": "Museo Academia",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "match-rung-4"
+  },
+  {
+    "left": {
+      "name": "Sostanza",
+      "lat": 43.7704496608,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "ambiguous"
+  },
+  {
+    "left": {
+      "name": "Sostanza",
+      "lat": 43.7717986432,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.cafe"
+    },
+    "expect": "match-rung-4"
+  },
+  {
+    "left": {
+      "name": "Sostanza",
+      "lat": 43.774496608,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Dwayne",
+      "lat": 43.774496608,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Duane",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Martha",
+      "lat": 43.7708993216,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Marhta",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "ambiguous"
+  },
+  {
+    "left": {
+      "name": "Caffè Gilli",
+      "lat": 43.7702248304,
+      "lng": 11.25,
+      "category": "food.cafe"
+    },
+    "right": {
+      "name": "Gilli",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.cafe"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Ristorante Trattoria Sostanza!",
+      "lat": 43.7701348982,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Palazzo Pitti",
+      "lat": 43.7702697965,
+      "lng": 11.25,
+      "category": "culture.architecture"
+    },
+    "right": {
+      "name": "Pitti",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.architecture"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Far Museum",
+      "lat": 43.8419457285,
+      "lng": 11.25,
+      "category": "culture.museum",
+      "osmId": "node/7"
+    },
+    "right": {
+      "name": "Near Restaurant",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "osmId": "node/7"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Uffizi",
+      "lat": 43.7701798643,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "right": {
+      "name": "Duomo",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "history.landmark"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Aaaa",
+      "lat": 43.7700899322,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Zzzz",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Martha",
+      "lat": 43.7708993216,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Marhta",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.cafe"
+    },
+    "expect": "match-rung-4"
+  },
+  {
+    "left": {
+      "name": "Dwayne",
+      "lat": 43.7708993216,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Duane",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "ambiguous"
+  },
+  {
+    "left": {
+      "name": "Il Gelateria",
+      "lat": 43.7701798643,
+      "lng": 11.25,
+      "category": "food.dessert"
+    },
+    "right": {
+      "name": "Gelateria",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.dessert"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Trattoria Sostanza",
+      "lat": 43.7703597286,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "website": "https://www.sostanza.it/en"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant",
+      "website": "http://sostanza.it"
+    },
+    "expect": "match-rung-2"
+  },
+  {
+    "left": {
+      "name": "Red House",
+      "lat": 43.7969796482,
+      "lng": 11.25,
+      "category": "culture.museum",
+      "osmId": "node/1"
+    },
+    "right": {
+      "name": "Blue Tower",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum",
+      "osmId": "node/2"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Museo Martha",
+      "lat": 43.772248304,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "right": {
+      "name": "Museo Marhta",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "match-rung-4"
+  },
+  {
+    "left": {
+      "name": "Museo Martha",
+      "lat": 43.7731476256,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "right": {
+      "name": "Museo Marhta",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "new"
+  },
+  {
+    "left": {
+      "name": "Dwayne",
+      "lat": 43.7726080327,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Duane",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "expect": "ambiguous"
+  },
+  {
+    "left": {
+      "name": "Ilaria",
+      "lat": 43.7703597286,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "right": {
+      "name": "Laria",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "match-rung-4"
+  },
+  {
+    "left": {
+      "name": "Bar 64",
+      "lat": 43.7700899322,
+      "lng": 11.25,
+      "category": "nightlife.bar"
+    },
+    "right": {
+      "name": "64",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "nightlife.bar"
+    },
+    "expect": "match-rung-3"
+  },
+  {
+    "left": {
+      "name": "Sostanza",
+      "lat": 43.7879864321,
+      "lng": 11.25,
+      "category": "food.restaurant"
+    },
+    "right": {
+      "name": "Sostanza",
+      "lat": 43.77,
+      "lng": 11.25,
+      "category": "culture.museum"
+    },
+    "expect": "new"
+  }
+]
