@@ -16,8 +16,12 @@ ui-debug.log
 infra/firebase/public/
 coverage/
 *.tsbuildinfo
-.cursor/
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
 *service-account*.json
 *.pem
 *.p12
 *.key
+work/**
+!work/README.md
