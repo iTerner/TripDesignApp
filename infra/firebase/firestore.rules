@@ -40,7 +40,27 @@ service cloud.firestore {
     match /configVersions/{docId} { allow read: if isAdmin(); allow write: if false; }
     match /auditLog/{docId}       { allow read: if isAdmin(); allow write: if false; }
 
-    // Everything else (plans, versions, places, packs, shares, ...) arrives in later phases.
+    // Scout menu: signed-in reads. Admin notes, merges, runs and reviews stay admin-read.
+    match /destinations/{slug} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /geometry/{docId} { allow read: if signedIn(); allow write: if false; }
+      // lock is a field on the destination doc, not a subcollection
+    }
+    match /places/{placeId} {
+      allow read: if signedIn();
+      allow write: if false;
+      match /evidence/{eid} { allow read: if signedIn(); allow write: if false; }
+      match /private/{docId} { allow read: if isAdmin(); allow write: if false; }
+    }
+    match /pendingMerges/{id} { allow read: if isAdmin(); allow write: if false; }
+    match /scoutRuns/{id}     { allow read: if isAdmin(); allow write: if false; }
+    match /reviewSessions/{id}{ allow read: if isAdmin(); allow write: if false; }
+    match /stayAreas/{id}     { allow read: if signedIn(); allow write: if false; }
+    match /packs/{slug}       { allow read: if signedIn(); allow write: if false; }
+    match /geocodeCache/{id}  { allow read, write: if false; }
+
+    // Everything else (plans, versions, shares, ...) arrives in later phases.
     match /{document=**} {
       allow read, write: if false;
     }
