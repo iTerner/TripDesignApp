@@ -53,7 +53,10 @@
       "counts": "{{scouted}} scouted · {{trending}} trending · {{hidden}} hidden",
       "runs": "Run history",
       "noRuns": "No runs for this destination.",
-      "noReport": "No report stored."
+      "noReport": "No report stored.",
+      "runGemini": "Run with Gemini",
+      "runQueued": "Run queued on GitHub",
+      "agentInCursor": "Agent runs start in Cursor."
     },
     "places": {
       "heading": "Places",

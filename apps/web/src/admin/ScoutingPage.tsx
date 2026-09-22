@@ -10,6 +10,7 @@ import {
 } from "@wayfare/domain";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
 import { Button } from "../components/ui/button";
 import { listDestinations, listScoutRuns } from "../lib/adminFirestore";
 import { apiFetch } from "../lib/api";
@@ -17,6 +18,11 @@ import { useAuth } from "../lib/useAuth";
 import { AdminError } from "./AdminError";
 
 const inputClass = "mt-1 w-full rounded-md border bg-background px-2 py-1 text-sm";
+
+const RunScoutResponseSchema = z.strictObject({
+  ok: z.literal(true),
+  slug: z.string().regex(/^[a-z0-9-]{2,64}$/),
+});
 
 export function ScoutingPage() {
   const { t } = useTranslation();
@@ -83,6 +89,16 @@ export function ScoutingPage() {
     onSuccess: async (_data, destSlug) => {
       if (selected === destSlug) setSelected(null);
       await refresh();
+    },
+  });
+  const runGemini = useMutation({
+    mutationFn: async (destSlug: string) => {
+      const token = await getIdToken();
+      return apiFetch("/admin/scout/run", RunScoutResponseSchema, {
+        method: "POST",
+        token,
+        body: JSON.stringify({ slug: destSlug }),
+      });
     },
   });
 
@@ -162,7 +178,7 @@ export function ScoutingPage() {
         </div>
       </form>
       {invalid ? <p className="text-sm text-red-600">{t("admin.invalid")}</p> : null}
-      <AdminError error={add.error ?? reorder.error ?? remove.error} />
+      <AdminError error={add.error ?? reorder.error ?? remove.error ?? runGemini.error} />
       {destinations.isPending ? <p>{t("admin.loading")}</p> : null}
       <AdminError error={destinations.error} />
       {destinations.data && rows.length === 0 ? <p>{t("admin.scouting.empty")}</p> : null}
@@ -173,7 +189,10 @@ export function ScoutingPage() {
               type="button"
               className="font-medium"
               aria-pressed={selected === dest.slug}
-              onClick={() => setSelected(dest.slug)}
+              onClick={() => {
+                runGemini.reset();
+                setSelected(dest.slug);
+              }}
             >
               {dest.name}
             </button>
@@ -219,6 +238,19 @@ export function ScoutingPage() {
           </li>
         ))}
       </ol>
+      <section className="space-y-2">
+        <Button
+          type="button"
+          disabled={selected === null || runGemini.isPending}
+          onClick={() => {
+            if (selected) runGemini.mutate(selected);
+          }}
+        >
+          {t("admin.scouting.runGemini")}
+        </Button>
+        <p className="text-sm text-muted-foreground">{t("admin.scouting.agentInCursor")}</p>
+        {runGemini.isSuccess ? <p className="text-sm">{t("admin.scouting.runQueued")}</p> : null}
+      </section>
       {selected ? (
         <section className="space-y-3">
           <h3 className="font-medium">{t("admin.scouting.runs")}</h3>

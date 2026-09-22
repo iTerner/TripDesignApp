@@ -53,7 +53,10 @@
       "counts": "{{scouted}} נסרקו · {{trending}} בטרנד · {{hidden}} מוסתרים",
       "runs": "היסטוריית ריצות",
       "noRuns": "אין ריצות ליעד הזה.",
-      "noReport": "לא נשמר דוח."
+      "noReport": "לא נשמר דוח.",
+      "runGemini": "הרצה עם Gemini",
+      "runQueued": "הריצה נכנסה לתור ב-GitHub",
+      "agentInCursor": "ריצות סוכן מתחילות ב-Cursor."
     },
     "places": {
       "heading": "מקומות",

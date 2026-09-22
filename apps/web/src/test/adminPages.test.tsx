@@ -156,6 +156,28 @@ test("merges shows an empty queue", async () => {
   expect(await screen.findByText("No open merges.")).toBeInTheDocument();
 });
 
+test("Run with Gemini stays disabled until a destination is selected and posts the slug without by", async () => {
+  vi.mocked(listDestinations).mockResolvedValue([tuscany]);
+  apiFetch.mockResolvedValue({ ok: true, slug: "tuscany" });
+  renderAdmin(<ScoutingPage />);
+  const run = await screen.findByRole("button", { name: "Run with Gemini" });
+  expect(run).toBeDisabled();
+  expect(screen.getByText("Agent runs start in Cursor.")).toBeInTheDocument();
+  await userEvent.click(await screen.findByRole("button", { name: "Tuscany" }));
+  expect(run).toBeEnabled();
+  await userEvent.click(run);
+  await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+  const call = apiFetch.mock.calls[0];
+  expect(call?.[0]).toBe("/admin/scout/run");
+  const init = call?.[2] as { method?: string; token?: string; body?: string };
+  expect(init.method).toBe("POST");
+  expect(init.token).toBe("fake-token");
+  const body = JSON.parse(init.body ?? "{}") as unknown;
+  expect(body).toEqual({ slug: "tuscany" });
+  expect(hasKey(body, "by")).toBe(false);
+  expect(await screen.findByText("Run queued on GitHub")).toBeInTheDocument();
+});
+
 test("a scout report is text, not HTML", async () => {
   const report = '<img src="x" onerror="alert(1)">';
   const run: ScoutRun = {
