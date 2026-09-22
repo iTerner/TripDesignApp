@@ -17,3 +17,10 @@ Low findings from the Phase 0 security review (`docs/superpowers/reviews/2026-09
 - [ ] L13 — `git tag -l "deploy-*"` is empty and `deploy.yml` never creates those tags, even though the site is live. Tag deploys from CI the way `prod.bat` does.
 - [ ] L14 — `pnpm audit --audit-level high` is clean. 1 low and 7 moderate remain in dev tooling. Clear or time-bound them in Phase 6.
 - [ ] L15 — Live Hosting HSTS is `max-age=31556926` while `firebase.json` sets `63072000`. Confirm whether Firebase Hosting overwrites the header and align the repo with what is actually served.
+
+Low findings from the Phase 1 scout review (`docs/superpowers/reviews/2026-09-22-phase-1-security-review.md`). Not fixed in Phase 1.
+
+- [ ] L16 — Scout page fetch checks DNS, then `fetch` resolves the hostname again. Pin the connection to the addresses that passed `assertPublicUrl` so a rebinding name cannot swap in a private address.
+- [ ] L17 — Extend the scout SSRF block list beyond loopback, RFC1918, link-local, and IPv6 ULA. Include CGNAT `100.64.0.0/10`, NAT64 `64:ff9b::/96`, and IPv6 multicast `ff00::/8`.
+- [ ] L18 — Place override field checks use `field in PlaceSchema.shape`, so prototype names such as `toString` miss the allowlist and become a generic 500. Use `Object.hasOwn` and return 400.
+- [ ] L19 — The admin place drawer uses evidence `url` as an `href`. `EvidenceSchema` accepts any URL scheme. Restrict rendered evidence links to `http:` and `https:`.
