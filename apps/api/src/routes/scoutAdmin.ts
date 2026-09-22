@@ -251,6 +251,21 @@ function trendScore(data: Record<string, unknown>): number {
   return typeof data.trendScore === "number" ? data.trendScore : 0;
 }
 
+async function writeAudit(
+  c: Context<AppEnv>,
+  db: ReturnType<typeof dbFor>,
+  action: string,
+  target: string,
+): Promise<void> {
+  const id = `aud_${crypto.randomUUID().replace(/-/g, "")}`;
+  await db.client.patchDocument(`auditLog/${id}`, {
+    action,
+    target,
+    actorUid: c.get("user").uid,
+    at: c.get("deps").now().toISOString(),
+  });
+}
+
 function activeForRun(doc: ListedDoc, destSlug: string, runId: string): boolean {
   const data = doc.data;
   return (
@@ -300,6 +315,7 @@ scoutAdminRoutes.post("/destinations", async (c) => {
     status: "queued",
     queueOrder,
   };
+  await writeAudit(c, db, "destination.create", `destinations/${body.slug}`);
   return c.json(response);
 });
 
@@ -321,6 +337,7 @@ scoutAdminRoutes.post("/destinations/reorder", async (c) => {
     );
   }
   const response: ReorderDestinationsResponse = { ok: true, order };
+  await writeAudit(c, db, "destination.reorder", "destinations");
   return c.json(response);
 });
 
@@ -339,6 +356,7 @@ scoutAdminRoutes.delete("/destinations/:slug", async (c) => {
   }
   await db.remove(`destinations/${slug}`);
   const response: DeleteDestinationResponse = { ok: true, slug };
+  await writeAudit(c, db, "destination.delete", `destinations/${slug}`);
   return c.json(response);
 });
 
@@ -360,6 +378,7 @@ scoutAdminRoutes.post("/run", async (c) => {
     if (e instanceof GithubDispatchError) return apiError(c, 503, e.code, e.message);
     throw e;
   }
+  await writeAudit(c, dbFor(c), "scout.run", `destinations/${body.slug}`);
   return c.json({ ok: true, slug: body.slug });
 });
 
@@ -398,6 +417,7 @@ placeAdminRoutes.post("/:id/overrides", async (c) => {
     );
   }
   const response: PlaceOverrideResponse = { ok: true, id, field: body.field };
+  await writeAudit(c, db, "place.override", `places/${id}`);
   return c.json(response);
 });
 
@@ -421,6 +441,7 @@ placeAdminRoutes.post("/:id/hide", async (c) => {
     { updateMask: ["hideReason"] },
   );
   const response: PlaceHideResponse = { ok: true, id, status: "hidden" };
+  await writeAudit(c, db, "place.hide", `places/${id}`);
   return c.json(response);
 });
 
@@ -443,6 +464,7 @@ mergeAdminRoutes.post("/:id", async (c) => {
       { updateMask: ["status", "resolvedBy", "resolvedAt"], mustExist: true },
     );
     const response: ResolveMergeResponse = { ok: true, id, status: "kept_both" };
+    await writeAudit(c, db, "merge.resolve", `pendingMerges/${id}`);
     return c.json(response);
   }
 
@@ -496,6 +518,7 @@ mergeAdminRoutes.post("/:id", async (c) => {
     { updateMask: ["status", "resolvedBy", "resolvedAt"], mustExist: true },
   );
   const response: ResolveMergeResponse = { ok: true, id, status: "merged" };
+  await writeAudit(c, db, "merge.resolve", `pendingMerges/${id}`);
   return c.json(response);
 });
 
@@ -538,6 +561,7 @@ reviewAdminRoutes.post("/", async (c) => {
     { mustNotExist: true },
   );
   const response: CreateReviewResponse = { ok: true, id, sampleSize: sample.length };
+  await writeAudit(c, db, "review.create", `reviewSessions/${id}`);
   return c.json(response);
 });
 
@@ -588,5 +612,6 @@ reviewAdminRoutes.post("/:id/verdict", async (c) => {
   }
   await db.client.patchDocument(`reviewSessions/${id}`, fields, { updateMask, mustExist: true });
   const response: ReviewVerdictResponse = { ok: true, id, accuracy, completed };
+  await writeAudit(c, db, "review.verdict", `reviewSessions/${id}`);
   return c.json(response);
 });

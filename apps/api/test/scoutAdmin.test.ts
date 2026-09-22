@@ -199,16 +199,21 @@ test("non-admin → 403 on every scout admin write", async () => {
   expect(fs.patches).toEqual([]);
 });
 
+function auditRows(docs: Map<string, Record<string, unknown>>): Record<string, unknown>[] {
+  return [...docs.entries()]
+    .filter(([path]) => path.startsWith("auditLog/"))
+    .map(([, data]) => data);
+}
+
 test("stale auth_time on POST → 401 reauth_required; fresh run dispatches Gemini", async () => {
+  const fs = memoryFirestore();
   const github: { url: string; init: RequestInit | undefined }[] = [];
-  let otherCalls = 0;
   const fetchImpl = async (url: string, init?: RequestInit) => {
     if (url.startsWith("https://api.github.com/")) {
       github.push({ url, init });
       return new Response(null, { status: 204 });
     }
-    otherCalls += 1;
-    throw new Error("firestore should not be called");
+    return fs.fetchImpl(url, init);
   };
   const { token, call } = await setup(fetchImpl);
   const stale = await token("admin-uid-1", nowSec - 16 * 60);
@@ -219,12 +224,12 @@ test("stale auth_time on POST → 401 reauth_required; fresh run dispatches Gemi
   });
   expect(staleRes.status).toBe(401);
   expect(await staleRes.json()).toMatchObject({ error: "reauth_required" });
+  expect(fs.patches).toEqual([]);
 
   const fresh = await token("admin-uid-1", nowSec - 14 * 60);
   const run = await call("POST", "/admin/scout/run", fresh, { slug: "tuscany" });
   expect(run.status).toBe(200);
   expect(await run.json()).toEqual({ ok: true, slug: "tuscany" });
-  expect(otherCalls).toBe(0);
   expect(github).toHaveLength(1);
   const headers = github[0]?.init?.headers as Record<string, string>;
   expect(headers.Authorization).toBe(`Bearer ${DISPATCH_TOKEN}`);
@@ -232,6 +237,16 @@ test("stale auth_time on POST → 401 reauth_required; fresh run dispatches Gemi
     ref: "master",
     inputs: { destinations: "tuscany", backend: "gemini" },
   });
+  const audits = auditRows(fs.docs);
+  expect(audits).toEqual([
+    {
+      action: "scout.run",
+      target: "destinations/tuscany",
+      actorUid: "admin-uid-1",
+      at: AT,
+    },
+  ]);
+  expect(JSON.stringify(audits)).not.toContain(DISPATCH_TOKEN);
 });
 
 test("scout run hides a non-204 GitHub body and skips dispatch when unset", async () => {
@@ -426,6 +441,12 @@ test("override sets by admin and a private note, and does not patch status", asy
   expect(fs.docs.get("places/p1/private/admin")).toEqual({
     notes: { dwellMin: "stayed longer" },
   });
+  const overrideAudit = auditRows(fs.docs);
+  expect(overrideAudit).toMatchObject([
+    { action: "place.override", target: "places/p1", actorUid: "admin-uid-1", at: AT },
+  ]);
+  expect(JSON.stringify(overrideAudit)).not.toContain("stayed longer");
+  expect(JSON.stringify(place)).not.toContain("admin-uid-1");
   expect(fs.patches.find((p) => p.path === "places/p1")?.mask).toEqual(["adminOverrides.dwellMin"]);
   expect(fs.patches.find((p) => p.path === "places/p1")?.mask).not.toContain("status");
 
@@ -464,6 +485,12 @@ test("hide sets status and the private reason; the mask is status only", async (
   });
   expect(fs.patches.find((p) => p.path === "places/p1")?.mask).toEqual(["status"]);
   expect(JSON.stringify(fs.docs.get("places/p1/private/admin"))).not.toContain("admin-uid-1");
+  const hideAudit = auditRows(fs.docs);
+  expect(hideAudit).toEqual([
+    { action: "place.hide", target: "places/p1", actorUid: "admin-uid-1", at: AT },
+  ]);
+  expect(JSON.stringify(hideAudit)).not.toContain("closed for good");
+  expect(JSON.stringify(fs.docs.get("places/p1"))).not.toContain("admin-uid-1");
 });
 
 test("merge keeps the winner, unions sources and evidence, and tombstones the loser", async () => {
@@ -548,7 +575,12 @@ test("keep_both marks the merge and changes neither place", async () => {
   expect(await res.json()).toEqual({ ok: true, id: "m2", status: "kept_both" });
   expect(fs.docs.get("places/a")).toEqual(beforeA);
   expect(fs.docs.get("places/b")).toEqual(beforeB);
-  expect(fs.patches.map((p) => p.path)).toEqual(["pendingMerges/m2"]);
+  expect(fs.patches.map((p) => p.path).filter((path) => !path.startsWith("auditLog/"))).toEqual([
+    "pendingMerges/m2",
+  ]);
+  expect(auditRows(fs.docs)).toMatchObject([
+    { action: "merge.resolve", target: "pendingMerges/m2", actorUid: "admin-uid-1" },
+  ]);
   expect(fs.docs.get("pendingMerges/m2")).toMatchObject({
     status: "kept_both",
     resolvedBy: "admin",
