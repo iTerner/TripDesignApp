@@ -26,6 +26,10 @@ beforeAll(async () => {
     batch.set(doc(db, "usageDaily/google_2026-09-20"), { total: 5 });
     batch.set(doc(db, "destinations/tuscany"), { status: "ready" });
     batch.set(doc(db, "destinations/tuscany/geometry/boundary"), { kind: "polygon" });
+    batch.set(doc(db, "destinations/tuscany/lock/current"), {
+      runId: "run-1",
+      startedAt: "2026-09-22T12:00:00.000Z",
+    });
     batch.set(doc(db, "places/p1"), { name: "Piazza" });
     batch.set(doc(db, "places/p1/evidence/e1"), { quote: "ok" });
     batch.set(doc(db, "places/p1/private/admin"), { note: "hide reason" });
@@ -98,6 +102,7 @@ const ALL_COLLECTIONS = [
   "places/p1/private/admin",
   "destinations/tuscany",
   "destinations/tuscany/geometry/boundary",
+  "destinations/tuscany/lock/current",
   "pendingMerges/m",
   "scoutRuns/r",
   "reviewSessions/s",
@@ -155,6 +160,7 @@ const ADMIN_ONLY_SCOUT_READS = [
   "pendingMerges/m",
   "scoutRuns/r",
   "reviewSessions/s",
+  "destinations/tuscany/lock/current",
 ] as const;
 
 const SCOUT_CLIENT_WRITES = [

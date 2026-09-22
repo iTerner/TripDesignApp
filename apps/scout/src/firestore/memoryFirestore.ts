@@ -30,6 +30,10 @@ export function createMemoryFirestore(): MemoryFirestore {
     if (parsed.pathname.endsWith(":runQuery")) return query(String(init?.body ?? ""));
     const path = decodeURIComponent(parsed.pathname.slice(DOC_PREFIX.length));
     if (init?.method === "PATCH") return patch(path, parsed, String(init.body ?? ""));
+    if (init?.method === "DELETE") {
+      const existed = docs.delete(path);
+      return new Response("{}", { status: existed ? 200 : 404 });
+    }
     const doc = docs.get(path);
     if (doc === undefined) return new Response("{}", { status: 404 });
     return json({ name: path, fields: encodeFields(doc) });

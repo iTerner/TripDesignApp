@@ -76,6 +76,18 @@ test("incrementFields quotes model ids so dots and colons stay one field", async
   ]);
 });
 
+test("deleteDocument sends DELETE and treats 404 as success", async () => {
+  const { calls, client } = recorder([
+    { status: 200, body: {} },
+    { status: 404, body: {} },
+  ]);
+  await client.deleteDocument("destinations/tuscany/lock/current");
+  await client.deleteDocument("destinations/tuscany/lock/current");
+  expect(calls[0]?.init?.method).toBe("DELETE");
+  expect(calls[0]?.url).toContain("/destinations/tuscany/lock/current");
+  expect(calls).toHaveLength(2);
+});
+
 test("commitUpdates sends an update mask and refuses more than 500 writes before any request", async () => {
   const { calls, client } = recorder([{ status: 200, body: {} }]);
   await client.commitUpdates([

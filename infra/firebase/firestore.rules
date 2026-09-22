@@ -45,7 +45,7 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
       match /geometry/{docId} { allow read: if signedIn(); allow write: if false; }
-      // lock is a field on the destination doc, not a subcollection
+      match /lock/{docId} { allow read: if isAdmin(); allow write: if false; }
     }
     match /places/{placeId} {
       allow read: if signedIn();

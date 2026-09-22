@@ -16,7 +16,7 @@ import {
   StayZoneSchema,
 } from "@wayfare/domain";
 import type { FirestoreClient } from "@wayfare/firestore";
-import { acquireLock } from "../firestore/lock";
+import { acquireLock, lockDocPath, readHeldRunId } from "../firestore/lock";
 import { assertWriteBudget, estimateWrites, ScoutError, usageDocPath } from "../firestore/quota";
 import { evidenceDocId } from "./07-writeDry";
 
@@ -52,7 +52,7 @@ export interface WriteInput {
 export async function writeDestination(db: FirestoreClient, input: WriteInput): Promise<void> {
   assertIds(input);
   await assertWriteBudget(db, estimateWrites(input), input.now);
-  const previousRunId = lockRunId(await db.getDocument(`destinations/${input.slug}`));
+  const previousRunId = await readHeldRunId(db, input.slug);
   await acquireLock(db, input.slug, input.runId, input.now, input.force);
   const usagePath = usageDocPath(input.now);
   try {
@@ -109,6 +109,7 @@ export async function writeDestination(db: FirestoreClient, input: WriteInput): 
       ["lastRunId", "counts", "status", "lock"],
     );
     await batch.flush();
+    await db.deleteDocument(lockDocPath(input.slug));
   } catch (error) {
     await markFailed(db, input, usagePath).catch(() => undefined);
     throw error;
@@ -336,15 +337,8 @@ async function markFailed(
     { status: "failed", lastRunId: input.runId },
     { updateMask: ["status", "lastRunId", "lock"] },
   );
+  await db.deleteDocument(lockDocPath(input.slug));
   await db.incrementFields(usagePath, { writes: 1 });
-}
-
-function lockRunId(dest: Record<string, unknown> | null): string | undefined {
-  if (dest === null) return undefined;
-  const lock = dest.lock;
-  if (typeof lock !== "object" || lock === null) return undefined;
-  const runId = (lock as Record<string, unknown>).runId;
-  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
 }
 
 function loadStays(outDir: string): StayZone[] {

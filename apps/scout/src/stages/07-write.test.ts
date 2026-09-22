@@ -127,14 +127,18 @@ test("a fresh Firestore lock is refused and an older lock can be replaced", asyn
   await expect(acquireLock(db.client, "tuscany", RUN, NOW, false)).rejects.toBeInstanceOf(
     ScoutError,
   );
-  expect((await db.client.getDocument("destinations/tuscany"))?.lock).toEqual({
+  const parent = await db.client.getDocument("destinations/tuscany");
+  expect(parent?.lock).toBeUndefined();
+  expect(parent?.name).toBe("Tuscany");
+  expect(await db.client.getDocument("destinations/tuscany/lock/current")).toEqual({
     runId: "run-old",
     startedAt: "2026-09-22T11:00:00.000Z",
   });
 
   const exact = createMemoryFirestore();
-  exact.seed("destinations/tuscany", {
-    lock: { runId: "run-old", startedAt: "2026-09-22T10:00:00.000Z" },
+  exact.seed("destinations/tuscany/lock/current", {
+    runId: "run-old",
+    startedAt: "2026-09-22T10:00:00.000Z",
   });
   await expect(acquireLock(exact.client, "tuscany", RUN, NOW, false)).rejects.toMatchObject({
     exitCode: 2,
@@ -147,8 +151,12 @@ test("a fresh Firestore lock is refused and an older lock can be replaced", asyn
   });
   await acquireLock(stale.client, "tuscany", RUN, NOW, false);
   const replaced = await stale.client.getDocument("destinations/tuscany");
-  expect(replaced?.lock).toEqual({ runId: RUN, startedAt: NOW.toISOString() });
+  expect(replaced?.lock).toBeUndefined();
   expect(replaced?.name).toBe("Tuscany");
+  expect(await stale.client.getDocument("destinations/tuscany/lock/current")).toEqual({
+    runId: RUN,
+    startedAt: NOW.toISOString(),
+  });
 });
 
 test("a finished run upserts base fields, the pack, and the run, then releases the lock", async () => {
@@ -212,6 +220,7 @@ test("a finished run upserts base fields, the pack, and the run, then releases t
     counts: { scouted: 1, userFound: 0, trending: 1, hidden: 0 },
   });
   expect(dest?.lock).toBeUndefined();
+  expect(await db.client.getDocument("destinations/tuscany/lock/current")).toBeNull();
   expect((await db.client.getDocument("usageDaily/firestore_2026-09-22"))?.writes).toBe(
     db.updateBatches.reduce((sum, size) => sum + size, 0) + db.patchCount,
   );
@@ -412,6 +421,7 @@ test("--force records the previous run and still releases the lock", async () =>
   });
   const dest = await db.client.getDocument("destinations/tuscany");
   expect(dest?.lock).toBeUndefined();
+  expect(await db.client.getDocument("destinations/tuscany/lock/current")).toBeNull();
   expect(dest?.status).toBe("ready");
   expect(dest?.name).toBe("Tuscany");
 });
@@ -423,6 +433,7 @@ test("a write failure after the lock marks the destination failed and clears the
   const dest = await db.client.getDocument("destinations/tuscany");
   expect(dest?.status).toBe("failed");
   expect(dest?.lock).toBeUndefined();
+  expect(await db.client.getDocument("destinations/tuscany/lock/current")).toBeNull();
 });
 
 test("the writer aborts before locking when the daily budget is spent", async () => {

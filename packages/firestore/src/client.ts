@@ -49,6 +49,12 @@ export class FirestoreClient {
     return fromFirestoreDocument((await res.json()) as { fields?: Record<string, FirestoreValue> });
   }
 
+  /** DELETE. A missing document is success. */
+  async deleteDocument(path: string): Promise<void> {
+    const res = await this.call(`${this.base}/${path}`, { method: "DELETE" }, true);
+    await res.body?.cancel().catch(() => undefined);
+  }
+
   /** PATCH with updateMask = upsert (creates the doc if missing unless mustExist). */
   async patchDocument(
     path: string,
