@@ -1,6 +1,6 @@
 import type { ModelEntry } from "@wayfare/domain";
+import type { FirestoreClient } from "@wayfare/firestore";
 import { type LlmErrorKind, providerDayKey, type QuotaStore } from "@wayfare/providers";
-import type { FirestoreClient } from "./client";
 
 /** Exhaustion flags in KV (rare writes); per-call counters in Firestore (spec §2.3 KV write ceiling). */
 export class FirestoreQuotaStore implements QuotaStore {

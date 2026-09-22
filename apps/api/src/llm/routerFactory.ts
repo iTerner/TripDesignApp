@@ -1,8 +1,8 @@
 import { DEFAULT_REGISTRY } from "@wayfare/domain";
+import type { FirestoreClient } from "@wayfare/firestore";
 import { GeminiProvider, ModelRouter, OpenRouterProvider } from "@wayfare/providers";
 import type { AppVariables } from "../app";
 import type { Env } from "../env";
-import type { FirestoreClient } from "../firestore/client";
 import { FirestoreQuotaStore } from "../firestore/quotaStore";
 
 export function createRouter(

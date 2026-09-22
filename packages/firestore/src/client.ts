@@ -1,12 +1,11 @@
 import type { FetchLike } from "@wayfare/providers";
+import { type FirestoreValue, fromFirestoreDocument, toFirestoreValue } from "./values";
 
 /** Firestore rejects unquoted paths that contain `:`, `.`, or `/` (model ids). Quote the whole name so `.` stays inside the field. */
 function quoteFieldPath(path: string): string {
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(path)) return path;
   return `\`${path.replace(/\\/g, "\\\\").replace(/`/g, "\\`")}\``;
 }
-
-import { type FirestoreValue, fromFirestoreDocument, toFirestoreValue } from "./values";
 
 export interface FirestoreClientOptions {
   projectId: string;

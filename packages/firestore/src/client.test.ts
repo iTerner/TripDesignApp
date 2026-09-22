@@ -1,5 +1,5 @@
-import { FirestoreClient } from "../src/firestore/client";
-import { fromFirestoreDocument, toFirestoreValue } from "../src/firestore/values";
+import { FirestoreClient } from "./client";
+import { fromFirestoreDocument, toFirestoreValue } from "./values";
 
 test("value codec round-trips strings, numbers, booleans, nested maps, arrays, null", () => {
   const v = { a: "x", n: 3, f: 1.5, b: true, z: null, m: { k: [1, "two", null] } };

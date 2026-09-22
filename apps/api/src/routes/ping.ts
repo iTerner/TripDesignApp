@@ -1,11 +1,10 @@
 import type { PingResponse } from "@wayfare/domain";
+import { FirestoreClient, getAccessToken, parseServiceAccount } from "@wayfare/firestore";
 import type { FetchLike } from "@wayfare/providers";
 import { Hono } from "hono";
 import type { AppEnv } from "../app";
 import { firebaseAuth } from "../auth/middleware";
 import type { Env } from "../env";
-import { FirestoreClient } from "../firestore/client";
-import { getAccessToken, parseServiceAccount } from "../firestore/serviceAccount";
 
 export function firestoreFor(env: Env, fetchImpl: FetchLike, now: () => Date): FirestoreClient {
   // Emulator mode (dev.bat only): plain http to the emulator, fixed "owner" bearer, no service account.

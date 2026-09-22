@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { DEFAULT_REGISTRY } from "@wayfare/domain";
-import { FirestoreClient } from "../src/firestore/client";
+import { FirestoreClient } from "@wayfare/firestore";
 import { FirestoreQuotaStore } from "../src/firestore/quotaStore";
 
 const NOW = new Date("2026-09-20T12:00:00Z");
