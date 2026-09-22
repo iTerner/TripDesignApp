@@ -1,0 +1,133 @@
+{
+  "version": 0.6,
+  "generator": "fixture",
+  "elements": [
+    {
+      "type": "node",
+      "id": 101,
+      "lat": 43.7686,
+      "lon": 11.2558,
+      "tags": {
+        "name": "Uffizi",
+        "tourism": "museum",
+        "wikidata": "Q123"
+      }
+    },
+    {
+      "type": "node",
+      "id": 102,
+      "lat": 43.7699,
+      "lon": 11.2532,
+      "tags": {
+        "name": "Sostanza",
+        "amenity": "restaurant",
+        "website": "https://sostanza.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 103,
+      "lat": 43.7678,
+      "lon": 11.2594,
+      "tags": {
+        "name": "Gelateria dei Neri",
+        "amenity": "ice_cream",
+        "opening_hours": "Tu-Su 11:00-23:30"
+      }
+    },
+    {
+      "type": "node",
+      "id": 104,
+      "lat": 43.7629,
+      "lon": 11.2653,
+      "tags": {
+        "name": "Piazzale Michelangelo",
+        "tourism": "viewpoint"
+      }
+    },
+    {
+      "type": "way",
+      "id": 105,
+      "center": { "lat": 43.7712, "lon": 11.2621 },
+      "tags": {
+        "name": "Forno Ghibellina",
+        "shop": "bakery",
+        "cuisine": "bread"
+      }
+    },
+    {
+      "type": "node",
+      "id": 106,
+      "lat": 43.7701,
+      "lon": 11.251,
+      "tags": {
+        "name": "Castello di Verrazzano",
+        "craft": "winery",
+        "wikipedia": "en:Castello_di_Verrazzano"
+      }
+    },
+    {
+      "type": "node",
+      "id": 107,
+      "lat": 43.7704,
+      "lon": 11.2528,
+      "tags": {
+        "name": "Hotel Davanzati",
+        "tourism": "hotel",
+        "website": "https://davanzati.example"
+      }
+    },
+    {
+      "type": "relation",
+      "id": 108,
+      "center": { "lat": 43.7626, "lon": 11.2496 },
+      "tags": {
+        "name": "Boboli",
+        "leisure": "park",
+        "website": "https://boboli.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 109,
+      "lat": 43.77,
+      "lon": 11.25,
+      "tags": {
+        "amenity": "cafe",
+        "website": "https://nameless.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 110,
+      "lat": 43.771,
+      "lon": 11.255,
+      "tags": {
+        "name": "Vacant Shop",
+        "shop": "vacant",
+        "website": "https://vacant.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 111,
+      "lat": 43.769,
+      "lon": 11.257,
+      "tags": {
+        "name": "Closed Museum",
+        "disused:tourism": "museum",
+        "website": "https://closed.example"
+      }
+    },
+    {
+      "type": "node",
+      "id": 112,
+      "lat": 43.768,
+      "lon": 11.256,
+      "tags": {
+        "name": "Plain Trattoria",
+        "amenity": "restaurant"
+      }
+    }
+  ]
+}

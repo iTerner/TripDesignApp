@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Q123": {
+      "type": "item",
+      "id": "Q123",
+      "labels": {
+        "en": { "language": "en", "value": "Uffizi" }
+      },
+      "descriptions": {
+        "en": { "language": "en", "value": "Art museum in Florence" }
+      },
+      "claims": {
+        "P856": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P856",
+              "datatype": "url",
+              "datavalue": { "value": "https://www.uffizi.it/", "type": "string" }
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ],
+        "P18": [
+          {
+            "mainsnak": {
+              "snaktype": "value",
+              "property": "P18",
+              "datatype": "commonsMedia",
+              "datavalue": { "value": "Uffizi.jpg", "type": "string" }
+            },
+            "type": "statement",
+            "rank": "normal"
+          }
+        ]
+      },
+      "sitelinks": {
+        "enwiki": { "site": "enwiki", "title": "Uffizi" },
+        "itwiki": { "site": "itwiki", "title": "Galleria degli Uffizi" },
+        "dewiki": { "site": "dewiki", "title": "Uffizien" },
+        "frwiki": { "site": "frwiki", "title": "Galerie des Offices" },
+        "eswiki": { "site": "eswiki", "title": "Galería Uffizi" },
+        "ptwiki": { "site": "ptwiki", "title": "Galeria Uffizi" },
+        "nlwiki": { "site": "nlwiki", "title": "Uffizi" },
+        "plwiki": { "site": "plwiki", "title": "Galeria Uffizi" },
+        "ruwiki": { "site": "ruwiki", "title": "Уффици" },
+        "jawiki": { "site": "jawiki", "title": "ウフィツィ美術館" },
+        "zhwiki": { "site": "zhwiki", "title": "乌菲兹美术馆" },
+        "arwiki": { "site": "arwiki", "title": "معرض أوفيزي" },
+        "svwiki": { "site": "svwiki", "title": "Uffizierna" },
+        "fiwiki": { "site": "fiwiki", "title": "Uffizi" },
+        "nowiki": { "site": "nowiki", "title": "Uffizi" },
+        "dawiki": { "site": "dawiki", "title": "Uffizi" },
+        "cswiki": { "site": "cswiki", "title": "Uffizi" },
+        "huwiki": { "site": "huwiki", "title": "Uffizi" },
+        "elwiki": { "site": "elwiki", "title": "Ουφίτσι" },
+        "hewiki": { "site": "hewiki", "title": "אופיצי" }
+      }
+    }
+  }
+}
