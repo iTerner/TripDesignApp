@@ -7,6 +7,7 @@ import {
   setPersistence,
   signInWithRedirect,
 } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 import { configureEmulators } from "./emulators";
 
 /**
@@ -30,7 +31,8 @@ const app = initializeApp({
 });
 
 export const auth = getAuth(app);
-configureEmulators(auth, import.meta.env);
+export const db = getFirestore(app);
+configureEmulators(auth, import.meta.env, db);
 
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });

@@ -11,6 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AdminMergesRouteImport } from './routes/admin.merges'
+import { Route as AdminPlacesRouteImport } from './routes/admin.places'
+import { Route as AdminReviewRouteImport } from './routes/admin.review'
+import { Route as AdminScoutRouteImport } from './routes/admin.scout'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +26,82 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminMergesRoute = AdminMergesRouteImport.update({
+  id: '/merges',
+  path: '/merges',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminPlacesRoute = AdminPlacesRouteImport.update({
+  id: '/places',
+  path: '/places',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminReviewRoute = AdminReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminScoutRoute = AdminScoutRouteImport.update({
+  id: '/scout',
+  path: '/scout',
+  getParentRoute: () => AdminRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/admin/merges': typeof AdminMergesRoute
+  '/admin/places': typeof AdminPlacesRoute
+  '/admin/review': typeof AdminReviewRoute
+  '/admin/scout': typeof AdminScoutRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/admin/merges': typeof AdminMergesRoute
+  '/admin/places': typeof AdminPlacesRoute
+  '/admin/review': typeof AdminReviewRoute
+  '/admin/scout': typeof AdminScoutRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/admin': typeof AdminRoute
+  '/admin': typeof AdminRouteWithChildren
+  '/admin/merges': typeof AdminMergesRoute
+  '/admin/places': typeof AdminPlacesRoute
+  '/admin/review': typeof AdminReviewRoute
+  '/admin/scout': typeof AdminScoutRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/admin/merges'
+    | '/admin/places'
+    | '/admin/review'
+    | '/admin/scout'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin'
-  id: '__root__' | '/' | '/admin'
+  to:
+    | '/'
+    | '/admin'
+    | '/admin/merges'
+    | '/admin/places'
+    | '/admin/review'
+    | '/admin/scout'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/admin/merges'
+    | '/admin/places'
+    | '/admin/review'
+    | '/admin/scout'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AdminRoute: typeof AdminRoute
+  AdminRoute: typeof AdminRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +120,56 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/merges': {
+      id: '/admin/merges'
+      path: '/merges'
+      fullPath: '/admin/merges'
+      preLoaderRoute: typeof AdminMergesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/places': {
+      id: '/admin/places'
+      path: '/places'
+      fullPath: '/admin/places'
+      preLoaderRoute: typeof AdminPlacesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/review': {
+      id: '/admin/review'
+      path: '/review'
+      fullPath: '/admin/review'
+      preLoaderRoute: typeof AdminReviewRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/scout': {
+      id: '/admin/scout'
+      path: '/scout'
+      fullPath: '/admin/scout'
+      preLoaderRoute: typeof AdminScoutRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
+interface AdminRouteChildren {
+  AdminMergesRoute: typeof AdminMergesRoute
+  AdminPlacesRoute: typeof AdminPlacesRoute
+  AdminReviewRoute: typeof AdminReviewRoute
+  AdminScoutRoute: typeof AdminScoutRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminMergesRoute: AdminMergesRoute,
+  AdminPlacesRoute: AdminPlacesRoute,
+  AdminReviewRoute: AdminReviewRoute,
+  AdminScoutRoute: AdminScoutRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AdminRoute: AdminRoute,
+  AdminRoute: AdminRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
