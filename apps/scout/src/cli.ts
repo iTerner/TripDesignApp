@@ -1,8 +1,17 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_REGISTRY, DEFAULT_SCOUT_CONFIG } from "@wayfare/domain";
+import { GeminiProvider, InMemoryQuotaStore, ModelRouter } from "@wayfare/providers";
 import { Command, InvalidArgumentError } from "commander";
+import { createAgentBackend } from "./backend/agent";
+import { createGeminiBackend } from "./backend/gemini";
+import type { IntelligenceBackend } from "./backend/types";
 import { EXIT } from "./exitCodes";
+import { fetchPage } from "./net/fetchPage";
+import { runPipeline } from "./pipeline";
+import { createTavilySearch } from "./search/tavily";
+import { dedupePlaces, readPlacesFile } from "./stages/04-resolve";
 import { formatStatus, type StatusBoard } from "./status";
 import { assertSafeSlug, openWork, type WorkLayout } from "./workDir";
 
@@ -129,30 +138,107 @@ function readBoard(slug: string, layout: WorkLayout): StatusBoard {
   };
 }
 
-function run(dest: string, opts: ScoutOptions): void {
+async function run(dest: string, opts: ScoutOptions): Promise<number> {
   let slug: string;
   try {
     slug = assertSafeSlug(dest);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "refused: slug";
     console.error(message);
-    process.exit(EXIT.refused);
+    return EXIT.refused;
   }
 
   if (opts.backend !== "agent" && opts.backend !== "gemini") {
     console.error("refused: backend must be gemini or agent");
-    process.exit(EXIT.refused);
+    return EXIT.refused;
   }
 
   if (opts.backend === "gemini" && !hasGeminiKeys()) {
     console.error("refused: --backend gemini requires GEMINI_API_KEY and TAVILY_API_KEY");
-    process.exit(EXIT.refused);
+    return EXIT.refused;
   }
 
   const repoRoot = findRepoRoot(fileURLToPath(import.meta.url));
   const layout = openWork(repoRoot, slug);
+  const cfg = DEFAULT_SCOUT_CONFIG;
+
+  if (opts.status === true) {
+    console.log(formatStatus(readBoard(slug, layout)));
+    return EXIT.done;
+  }
+
+  if (opts.report === true) {
+    const reportFile = join(layout.outDir, "run-report.md");
+    if (!existsSync(reportFile)) {
+      console.error("refused: no run report");
+      return EXIT.refused;
+    }
+    console.log(readFileSync(reportFile, "utf8"));
+    return EXIT.done;
+  }
+
+  if (opts.dedupe === true) {
+    const placesFile = join(layout.outDir, "places.json");
+    if (!existsSync(placesFile)) {
+      console.error("refused: no places to dedupe");
+      return EXIT.refused;
+    }
+    const merges = dedupePlaces(readPlacesFile(placesFile), cfg, slug);
+    mkdirSync(layout.outDir, { recursive: true });
+    writeFileSync(
+      join(layout.outDir, "pending-merges.json"),
+      `${JSON.stringify(merges, null, 2)}\n`,
+    );
+    console.log(`pending merges: ${merges.length}`);
+    return EXIT.done;
+  }
+
+  if (opts.dryRun !== true) {
+    console.log(formatStatus(readBoard(slug, layout)));
+    return EXIT.done;
+  }
+
+  const backend = buildBackend(opts, layout, cfg);
+  const result = await runPipeline({
+    repoRoot,
+    slug,
+    backend,
+    cfg,
+    dryRun: true,
+    now: () => new Date(),
+    budget: { llm: opts.budget ?? cfg.budgetLlmCalls, searches: cfg.maxSearches },
+    ...(opts.force === true ? { force: true } : {}),
+  });
   console.log(formatStatus(readBoard(slug, layout)));
-  process.exit(EXIT.done);
+  return result.exitCode;
+}
+
+function buildBackend(
+  opts: ScoutOptions,
+  layout: WorkLayout,
+  cfg: typeof DEFAULT_SCOUT_CONFIG,
+): IntelligenceBackend {
+  if (opts.backend === "gemini") {
+    const geminiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
+    const tavilyKey = process.env.TAVILY_API_KEY?.trim() ?? "";
+    const budget = { llmCalls: 0, searches: 0 };
+    return createGeminiBackend({
+      router: new ModelRouter({
+        registry: DEFAULT_REGISTRY,
+        providers: { google: new GeminiProvider(geminiKey) },
+        quota: new InMemoryQuotaStore(),
+      }),
+      search: createTavilySearch(tavilyKey, fetch, cfg),
+      fetchPage,
+      budget,
+      limits: { llm: opts.budget ?? cfg.budgetLlmCalls, searches: cfg.maxSearches },
+    });
+  }
+  return createAgentBackend({
+    packetsDir: layout.packetsDir,
+    readFile: readFileSync,
+    writeFile: writeFileSync,
+  });
 }
 
 const program = new Command();
@@ -170,13 +256,14 @@ program
   .option("--report", "print the run report")
   .option("--dedupe", "re-run resolve and write pending merges")
   .option("--force", "replace a fresh run lock")
-  .action((dest: string, opts: ScoutOptions) => {
+  .action(async (dest: string, opts: ScoutOptions) => {
     try {
-      run(dest, opts);
+      const code = await run(dest, opts);
+      process.exit(code);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "scout failed";
       console.error(message);
-      process.exit(EXIT.error);
+      process.exit(message.startsWith("refused:") ? EXIT.refused : EXIT.error);
     }
   });
 
