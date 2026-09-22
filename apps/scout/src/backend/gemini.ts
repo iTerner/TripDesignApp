@@ -108,15 +108,13 @@ async function collectPages(
     opts.budget.searches += 1;
     const hits = await opts.search.search(query);
     for (const hit of hits) {
-      if (typeof hit.rawContent === "string") {
-        parts.push({ url: hit.url, text: hit.rawContent });
-        continue;
-      }
       const fetched = await opts.fetchPage(hit.url, {
         fetchImpl: globalThis.fetch,
         cfg: DEFAULT_SCOUT_CONFIG,
       });
-      if ("text" in fetched) parts.push({ url: hit.url, text: fetched.text });
+      if (!("text" in fetched) || !fetched.quoteAllowed) continue;
+      const text = typeof hit.rawContent === "string" ? hit.rawContent : fetched.text;
+      parts.push({ url: hit.url, text });
     }
   }
   parts.push(...pages);

@@ -223,6 +223,7 @@ test("extractTrends searches at most searchesPerPacket times and truncates page 
     search: async (query) => [
       { url: `https://example.com/${query}`, title: query, rawContent: `HIT_${query}` },
     ],
+    fetchPage: async () => ({ text: "quoted page", quoteAllowed: true }),
   });
   const filler = "B".repeat(maxChars);
   const pages = [{ url: "https://example.com/long", text: `${filler}TRUNCATE_ME` }];
@@ -240,6 +241,29 @@ test("extractTrends searches at most searchesPerPacket times and truncates page 
   expect(pageText).toContain("HIT_q2");
   expect(pageText).not.toContain("TRUNCATE_ME");
   expect(run.mock.calls[0]?.[0]).toBe("extract");
+});
+
+test("extractTrends drops page bodies when quotes are disallowed or the fetch is skipped", async () => {
+  const run = vi.fn(async () => routerResult(JSON.stringify({ findings: [] })));
+  const blocked = gemini({
+    run,
+    search: async () => [
+      { url: "https://example.com/noai", title: "Hidden", rawContent: "SECRET_BODY" },
+    ],
+    fetchPage: async () => ({ text: "SECRET_BODY", quoteAllowed: false }),
+  });
+  await blocked.backend.extractTrends(trendsReq(["q"]), []);
+  expect(routerRequest(run.mock.calls, 0).prompt).not.toContain("SECRET_BODY");
+
+  const skipped = gemini({
+    run,
+    search: async () => [
+      { url: "https://example.com/loop", title: "Loop", rawContent: "SECRET_BODY" },
+    ],
+    fetchPage: async () => ({ skipped: "ssrf" }),
+  });
+  await skipped.backend.extractTrends(trendsReq(["q"]), []);
+  expect(routerRequest(run.mock.calls, 1).prompt).not.toContain("SECRET_BODY");
 });
 
 test("extractTrends fetches pages when a hit has no raw content", async () => {
