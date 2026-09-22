@@ -12,6 +12,8 @@ on:
         default: gemini
         type: choice
         options: [gemini]
+permissions:
+  contents: read
 jobs:
   scout:
     runs-on: ubuntu-latest
@@ -23,9 +25,15 @@ jobs:
       - name: Refuse agent backend
         if: inputs.backend != 'gemini'
         run: exit 1
-      - run: pnpm scout ${{ inputs.destinations }} --backend gemini
+      - name: Scout
         env:
+          DESTINATIONS: ${{ inputs.destinations }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          case "$DESTINATIONS" in
+            ""|*[!a-z0-9-]*) exit 1 ;;
+          esac
+          pnpm scout "$DESTINATIONS" --backend gemini
