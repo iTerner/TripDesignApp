@@ -7,6 +7,12 @@ import { firebaseAuth } from "../auth/middleware";
 import { apiError } from "../http/errors";
 import { createRouter } from "../llm/routerFactory";
 import { firestoreFor } from "./ping";
+import {
+  mergeAdminRoutes,
+  placeAdminRoutes,
+  reviewAdminRoutes,
+  scoutAdminRoutes,
+} from "./scoutAdmin";
 
 export const adminRoutes = new Hono<AppEnv>();
 // Guard first, for every method and path under /admin — unknown admin paths return 403 to non-admins, not 404.
@@ -44,3 +50,8 @@ adminRoutes.post("/llm/ping", async (c) => {
     throw e;
   }
 });
+
+adminRoutes.route("/scout", scoutAdminRoutes);
+adminRoutes.route("/places", placeAdminRoutes);
+adminRoutes.route("/merges", mergeAdminRoutes);
+adminRoutes.route("/reviews", reviewAdminRoutes);
