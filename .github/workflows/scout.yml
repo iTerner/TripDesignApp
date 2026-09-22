@@ -1,0 +1,32 @@
+name: scout
+on:
+  workflow_dispatch:
+    inputs:
+      destinations:
+        description: "Comma-separated slugs"
+        required: true
+        type: string
+      backend:
+        description: "gemini only"
+        required: true
+        default: gemini
+        type: choice
+        options: [gemini]
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: ".nvmrc" }
+      - run: corepack enable && pnpm install --frozen-lockfile
+      - name: Refuse agent backend
+        if: inputs.backend != 'gemini'
+        run: exit 1
+      # Part B removes --dry-run once stage 7 writes Firestore
+      - run: pnpm scout ${{ inputs.destinations }} --backend gemini --dry-run
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
