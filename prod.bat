@@ -194,7 +194,7 @@ if %DEPLOY_API%==1 (
         echo [ERROR] .env not found in repo root. Create it from .env.example.
         goto error
     )
-    for %%S in (GEMINI_API_KEY OPENROUTER_API_KEY TAVILY_API_KEY ADMIN_UIDS FIREBASE_SERVICE_ACCOUNT) do (
+    for %%S in (GEMINI_API_KEY OPENROUTER_API_KEY TAVILY_API_KEY ADMIN_UIDS FIREBASE_SERVICE_ACCOUNT GITHUB_DISPATCH_TOKEN) do (
         set "SECRET_VAL="
         for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env") do (
             if "%%A"=="%%S" set "SECRET_VAL=%%B"

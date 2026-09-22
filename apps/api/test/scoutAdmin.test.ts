@@ -147,10 +147,19 @@ function readPath(obj: Record<string, unknown>, parts: string[]): unknown {
   return cur;
 }
 
-async function setup(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+const DISPATCH_TOKEN = "dispatch-test-token";
+
+async function setup(
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+  extra: { GITHUB_DISPATCH_TOKEN?: string } = {},
+) {
   const jwks = await makeTestJwks();
   const app = createApp({ jwks: jwks.getKey, now: () => NOW, fetchImpl });
-  const bindings = { ...env, FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON };
+  const bindings = {
+    ...env,
+    FIREBASE_SERVICE_ACCOUNT: TEST_SA_JSON,
+    GITHUB_DISPATCH_TOKEN: extra.GITHUB_DISPATCH_TOKEN ?? DISPATCH_TOKEN,
+  };
   const token = (sub: string, authTime = nowSec - 30) => jwks.sign({ sub, auth_time: authTime });
   const call = (method: string, path: string, bearer: string, body?: unknown) =>
     app.request(
@@ -190,10 +199,15 @@ test("non-admin → 403 on every scout admin write", async () => {
   expect(fs.patches).toEqual([]);
 });
 
-test("stale auth_time on POST → 401 reauth_required; fresh run → 501 not_implemented", async () => {
-  let calls = 0;
-  const fetchImpl = async () => {
-    calls += 1;
+test("stale auth_time on POST → 401 reauth_required; fresh run dispatches Gemini", async () => {
+  const github: { url: string; init: RequestInit | undefined }[] = [];
+  let otherCalls = 0;
+  const fetchImpl = async (url: string, init?: RequestInit) => {
+    if (url.startsWith("https://api.github.com/")) {
+      github.push({ url, init });
+      return new Response(null, { status: 204 });
+    }
+    otherCalls += 1;
     throw new Error("firestore should not be called");
   };
   const { token, call } = await setup(fetchImpl);
@@ -208,9 +222,54 @@ test("stale auth_time on POST → 401 reauth_required; fresh run → 501 not_imp
 
   const fresh = await token("admin-uid-1", nowSec - 14 * 60);
   const run = await call("POST", "/admin/scout/run", fresh, { slug: "tuscany" });
-  expect(run.status).toBe(501);
-  expect(await run.json()).toMatchObject({ error: "not_implemented" });
-  expect(calls).toBe(0);
+  expect(run.status).toBe(200);
+  expect(await run.json()).toEqual({ ok: true, slug: "tuscany" });
+  expect(otherCalls).toBe(0);
+  expect(github).toHaveLength(1);
+  const headers = github[0]?.init?.headers as Record<string, string>;
+  expect(headers.Authorization).toBe(`Bearer ${DISPATCH_TOKEN}`);
+  expect(JSON.parse(String(github[0]?.init?.body))).toEqual({
+    ref: "master",
+    inputs: { destinations: "tuscany", backend: "gemini" },
+  });
+});
+
+test("scout run hides a non-204 GitHub body and skips dispatch when unset", async () => {
+  const marker = "upstream-body-marker";
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ token: DISPATCH_TOKEN, detail: marker }), { status: 422 });
+  };
+  const { token, call } = await setup(fetchImpl);
+  const fresh = await token("admin-uid-1");
+  const failed = await call("POST", "/admin/scout/run", fresh, { slug: "tuscany" });
+  expect(failed.status).toBe(503);
+  const failedBody = await failed.json();
+  expect(failedBody).toEqual({ error: "upstream_exhausted", message: "GitHub HTTP 422" });
+  expect(JSON.stringify(failedBody)).not.toContain(DISPATCH_TOKEN);
+  expect(JSON.stringify(failedBody)).not.toContain(marker);
+
+  const bad = await call("POST", "/admin/scout/run", fresh, { slug: "Tuscany" });
+  expect(bad.status).toBe(400);
+  expect(calls).toBe(1);
+
+  const unset = await setup(
+    async () => {
+      calls += 1;
+      throw new Error("github should not be called");
+    },
+    { GITHUB_DISPATCH_TOKEN: "" },
+  );
+  const missing = await unset.call("POST", "/admin/scout/run", await unset.token("admin-uid-1"), {
+    slug: "tuscany",
+  });
+  expect(missing.status).toBe(503);
+  expect(await missing.json()).toEqual({
+    error: "upstream_exhausted",
+    message: "GitHub dispatch is not configured",
+  });
+  expect(calls).toBe(1);
 });
 
 test("GET scout paths are not added", async () => {

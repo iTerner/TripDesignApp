@@ -3,7 +3,7 @@ import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 export default defineWorkersConfig({
   test: {
     globals: true,
-    include: ["test/**/*.test.ts"],
+    include: ["test/**/*.test.ts", "src/**/*.test.ts"],
     poolOptions: {
       workers: {
         wrangler: { configPath: "./wrangler.toml" },
@@ -16,6 +16,7 @@ export default defineWorkersConfig({
             OPENROUTER_API_KEY: "o",
             TAVILY_API_KEY: "t",
             FIREBASE_SERVICE_ACCOUNT: "{}",
+            GITHUB_DISPATCH_TOKEN: "dispatch-test-token",
           },
           kvNamespaces: ["CONFIG_KV"],
         },

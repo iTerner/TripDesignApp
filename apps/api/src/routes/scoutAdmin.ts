@@ -25,12 +25,17 @@ import {
 import type { FetchLike } from "@wayfare/providers";
 import type { Context } from "hono";
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../app";
 import type { Env } from "../env";
+import { dispatchScout, GithubDispatchError } from "../github/dispatch";
 import { apiError } from "../http/errors";
 import { firestoreFor } from "./ping";
 
 const SLUG = /^[a-z0-9-]{2,64}$/;
+const RunScoutRequestSchema = z.strictObject({
+  slug: z.string().regex(SLUG),
+});
 const DOC_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const FIELD = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BLOCKED_OVERRIDE_FIELDS = new Set([
@@ -337,10 +342,26 @@ scoutAdminRoutes.delete("/destinations/:slug", async (c) => {
   return c.json(response);
 });
 
-// Task B6 replaces this with GitHub workflow_dispatch. No token is read here.
-scoutAdminRoutes.post("/run", (c) =>
-  apiError(c, 501, "not_implemented", "Scout run dispatch is not implemented"),
-);
+scoutAdminRoutes.post("/run", async (c) => {
+  const body = await parseBody(c, RunScoutRequestSchema);
+  if (body instanceof Response) return body;
+  const token = (c.env.GITHUB_DISPATCH_TOKEN ?? "").trim();
+  if (token === "") {
+    return apiError(c, 503, "upstream_exhausted", "GitHub dispatch is not configured");
+  }
+  try {
+    await dispatchScout({
+      token,
+      repo: "iTerner/TripDesignApp",
+      slug: body.slug,
+      fetchImpl: c.get("deps").fetchImpl,
+    });
+  } catch (e) {
+    if (e instanceof GithubDispatchError) return apiError(c, 503, e.code, e.message);
+    throw e;
+  }
+  return c.json({ ok: true, slug: body.slug });
+});
 
 export const placeAdminRoutes = new Hono<AppEnv>();
 

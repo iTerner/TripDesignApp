@@ -11,7 +11,7 @@ Local web: http://localhost:5173 via `dev.bat` (once Task 12 has created `apps/w
 ## Rotate a leaked key
 
 1. Revoke the key in the provider console (AI Studio / OpenRouter / GCP service-account keys for project `tripdesignai`).
-2. `cd apps/api && pnpm dlx wrangler@4 secret put <NAME>` with the new value, targeting Worker `wayfare-api`. Names: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT`.
+2. `cd apps/api && pnpm dlx wrangler@4 secret put <NAME>` with the new value, targeting Worker `wayfare-api`. Names: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `ADMIN_UIDS`, `FIREBASE_SERVICE_ACCOUNT`, `GITHUB_DISPATCH_TOKEN`.
 3. For the service account also update the GitHub secret `FIREBASE_SERVICE_ACCOUNT`.
 4. Delete the cached token: KV key `sa_access_token` for `wayfare-api` in the Cloudflare dashboard.
 

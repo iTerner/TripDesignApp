@@ -8,6 +8,8 @@ export interface Env {
   OPENROUTER_API_KEY: string;
   TAVILY_API_KEY: string;
   FIREBASE_SERVICE_ACCOUNT: string;
+  /** Fine-grained PAT for workflow_dispatch. Worker secret. Never log. */
+  GITHUB_DISPATCH_TOKEN: string;
   /** Set ONLY by dev.bat via `wrangler dev --var`; when present, tokens from the Auth emulator are accepted (Task 7). Never set in production. */
   FIREBASE_AUTH_EMULATOR_HOST?: string;
   /** Set ONLY by dev.bat; Firestore REST calls go to the emulator (Task 9). */
