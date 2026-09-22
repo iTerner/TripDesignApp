@@ -5,6 +5,8 @@ const DIST = resolve(import.meta.dirname, "../../apps/web/dist");
 const PATTERNS: [RegExp, string][] = [
   [/sk-or-v1-[0-9a-f]{64}/, "OpenRouter key"],
   [/tvly-[0-9A-Za-z_-]{20,}/, "Tavily key"],
+  [/FIREBASE_SERVICE_ACCOUNT/, "Firebase service account env name"],
+  [/GITHUB_DISPATCH_TOKEN/, "GitHub dispatch token env name"],
   [/"private_key"/, "service-account private key field"],
   [/-----BEGIN (RSA |EC )?PRIVATE KEY-----/, "private key block"],
   [
